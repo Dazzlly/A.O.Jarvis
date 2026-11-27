@@ -88,7 +88,8 @@ data class JarvisSettings(
     val autoCheckUpdates: Boolean = true,
     val themeMode: AppThemeMode = AppThemeMode.TRON,
     val customAccentColor: Long = DEFAULT_CUSTOM_ACCENT_COLOR,
-    val darkTheme: Boolean = true
+    val darkTheme: Boolean = true,
+    val skipAccountSignIn: Boolean = false
 )
 
 class SettingsDataStore(private val context: Context) {
@@ -116,6 +117,7 @@ class SettingsDataStore(private val context: Context) {
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val CUSTOM_ACCENT_COLOR = longPreferencesKey("custom_accent_color")
+        val SKIP_ACCOUNT_SIGN_IN = booleanPreferencesKey("skip_account_sign_in")
     }
 
     val settingsFlow: Flow<JarvisSettings> = context.jarvisDataStore.data.map { prefs ->
@@ -152,7 +154,8 @@ class SettingsDataStore(private val context: Context) {
             autoCheckUpdates = prefs[Keys.AUTO_CHECK_UPDATES] ?: true,
             themeMode = resolvedThemeMode,
             customAccentColor = prefs[Keys.CUSTOM_ACCENT_COLOR] ?: DEFAULT_CUSTOM_ACCENT_COLOR,
-            darkTheme = resolvedThemeMode.isDark
+            darkTheme = resolvedThemeMode.isDark,
+            skipAccountSignIn = prefs[Keys.SKIP_ACCOUNT_SIGN_IN] ?: false
         )
     }
 
@@ -257,6 +260,12 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun updateDarkTheme(enabled: Boolean) {
         updateThemeMode(if (enabled) AppThemeMode.OBSIDIAN else AppThemeMode.DAYLIGHT)
+    }
+
+    suspend fun updateSkipAccountSignIn(skipped: Boolean) {
+        context.jarvisDataStore.edit {
+            it[Keys.SKIP_ACCOUNT_SIGN_IN] = skipped
+        }
     }
 
     private fun generateSecureToken(): String {

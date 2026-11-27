@@ -84,9 +84,12 @@ sealed interface StreamingUiState {
 
 class OpenJarvisViewModel(
     application: Application,
-    private val currentUserId: String,
-    private val cloudRepository: JarvisCloudRepository
+    private val currentUserId: String?,
+    private val cloudRepository: JarvisCloudRepository?
 ) : AndroidViewModel(application) {
+
+    private val isCloudAuthenticated: Boolean
+        get() = !currentUserId.isNullOrBlank() && cloudRepository != null
 
     private val coordinator = JarvisRuntimeCoordinator.getInstance(application.applicationContext)
     private val database = coordinator.database
@@ -108,62 +111,83 @@ class OpenJarvisViewModel(
     val defaultAssistantStatus: StateFlow<DefaultAssistantStatus> = _defaultAssistantStatus.asStateFlow()
 
     private val _isCloudSyncing = MutableStateFlow(false)
-    private val _cloudStatusMessage = MutableStateFlow("Sincronização Firestore ativa em tempo real")
-
-    // Two-tier Flow error unwrapping: CancellationException -> FirebaseFirestoreException -> CloudUiState.Error
-    val cloudMemoriesState: StateFlow<CloudUiState<List<CloudMemory>>> = cloudRepository
-        .observeMemories(currentUserId)
-        .map<List<CloudMemory>, CloudUiState<List<CloudMemory>>> { CloudUiState.Success(it) }
-        .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            val rootError = firestoreError ?: error
-            Log.w("OpenJarvisVM", "Error observing cloud memories", rootError)
-            emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar memórias na nuvem."))
+    private val _cloudStatusMessage = MutableStateFlow(
+        if (isCloudAuthenticated) {
+            "Sincronização Firestore ativa em tempo real"
+        } else {
+            "Modo local ativo (sem conta conectada)"
         }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = CloudUiState.Loading
-        )
+    )
 
-    val cloudCommandsState: StateFlow<CloudUiState<List<CloudVoiceCommand>>> = cloudRepository
-        .observeVoiceCommands(currentUserId)
-        .map<List<CloudVoiceCommand>, CloudUiState<List<CloudVoiceCommand>>> { CloudUiState.Success(it) }
-        .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            val rootError = firestoreError ?: error
-            Log.w("OpenJarvisVM", "Error observing cloud voice commands", rootError)
-            emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar comandos na nuvem."))
+    // Two-tier Flow error unwrapping: only attach Firestore listeners when authenticated with Google
+    val cloudMemoriesState: StateFlow<CloudUiState<List<CloudMemory>>> =
+        if (currentUserId != null && cloudRepository != null) {
+            cloudRepository
+                .observeMemories(currentUserId)
+                .map<List<CloudMemory>, CloudUiState<List<CloudMemory>>> { CloudUiState.Success(it) }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w("OpenJarvisVM", "Error observing cloud memories", rootError)
+                    emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar memórias na nuvem."))
+                }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(5000L),
+                    initialValue = CloudUiState.Loading
+                )
+        } else {
+            MutableStateFlow<CloudUiState<List<CloudMemory>>>(CloudUiState.Success(emptyList())).asStateFlow()
         }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = CloudUiState.Loading
-        )
 
-    val cloudSessionsState: StateFlow<CloudUiState<List<CloudSession>>> = cloudRepository
-        .observeSessions(currentUserId)
-        .map<List<CloudSession>, CloudUiState<List<CloudSession>>> { CloudUiState.Success(it) }
-        .catch { error ->
-            val firestoreError = generateSequence(error) { it.cause }
-                .filterIsInstance<FirebaseFirestoreException>()
-                .firstOrNull()
-            if (firestoreError == null && error is CancellationException) throw error
-            val rootError = firestoreError ?: error
-            Log.w("OpenJarvisVM", "Error observing cloud sessions", rootError)
-            emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar sessões na nuvem."))
+    val cloudCommandsState: StateFlow<CloudUiState<List<CloudVoiceCommand>>> =
+        if (currentUserId != null && cloudRepository != null) {
+            cloudRepository
+                .observeVoiceCommands(currentUserId)
+                .map<List<CloudVoiceCommand>, CloudUiState<List<CloudVoiceCommand>>> { CloudUiState.Success(it) }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w("OpenJarvisVM", "Error observing cloud voice commands", rootError)
+                    emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar comandos na nuvem."))
+                }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(5000L),
+                    initialValue = CloudUiState.Loading
+                )
+        } else {
+            MutableStateFlow<CloudUiState<List<CloudVoiceCommand>>>(CloudUiState.Success(emptyList())).asStateFlow()
         }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000L),
-            initialValue = CloudUiState.Loading
-        )
+
+    val cloudSessionsState: StateFlow<CloudUiState<List<CloudSession>>> =
+        if (currentUserId != null && cloudRepository != null) {
+            cloudRepository
+                .observeSessions(currentUserId)
+                .map<List<CloudSession>, CloudUiState<List<CloudSession>>> { CloudUiState.Success(it) }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val rootError = firestoreError ?: error
+                    Log.w("OpenJarvisVM", "Error observing cloud sessions", rootError)
+                    emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar sessões na nuvem."))
+                }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(5000L),
+                    initialValue = CloudUiState.Loading
+                )
+        } else {
+            MutableStateFlow<CloudUiState<List<CloudSession>>>(CloudUiState.Success(emptyList())).asStateFlow()
+        }
 
     val cloudSyncSummary: StateFlow<CloudSyncSummary> = combine(
         cloudMemoriesState,
@@ -172,31 +196,48 @@ class OpenJarvisViewModel(
         _isCloudSyncing,
         _cloudStatusMessage
     ) { memState, cmdState, sessState, syncing, statusMsg ->
-        val user = Firebase.auth.currentUser
-        val memCount = (memState as? CloudUiState.Success)?.data?.size ?: 0
-        val cmdCount = (cmdState as? CloudUiState.Success)?.data?.size ?: 0
-        val sessCount = (sessState as? CloudUiState.Success)?.data?.size ?: 0
-        val firstError = (memState as? CloudUiState.Error)?.message
-            ?: (cmdState as? CloudUiState.Error)?.message
-            ?: (sessState as? CloudUiState.Error)?.message
-        CloudSyncSummary(
-            userId = currentUserId,
-            displayName = user?.displayName.orEmpty().ifBlank { "Usuário A.O.Jarvis" },
-            email = user?.email.orEmpty(),
-            memoriesCount = memCount,
-            commandsCount = cmdCount,
-            sessionsCount = sessCount,
-            isSyncing = syncing,
-            lastSyncMessage = statusMsg,
-            errorMessage = firstError
-        )
+        if (!isCloudAuthenticated) {
+            CloudSyncSummary(
+                isAuthenticated = false,
+                userId = "",
+                displayName = "Modo Local (Sem Conta)",
+                email = "Sincronização em nuvem desativada",
+                memoriesCount = 0,
+                commandsCount = 0,
+                sessionsCount = 0,
+                isSyncing = false,
+                lastSyncMessage = "Conecte sua conta Google para habilitar backup e sincronização no Firestore.",
+                errorMessage = null
+            )
+        } else {
+            val user = Firebase.auth.currentUser
+            val memCount = (memState as? CloudUiState.Success)?.data?.size ?: 0
+            val cmdCount = (cmdState as? CloudUiState.Success)?.data?.size ?: 0
+            val sessCount = (sessState as? CloudUiState.Success)?.data?.size ?: 0
+            val firstError = (memState as? CloudUiState.Error)?.message
+                ?: (cmdState as? CloudUiState.Error)?.message
+                ?: (sessState as? CloudUiState.Error)?.message
+            CloudSyncSummary(
+                isAuthenticated = true,
+                userId = currentUserId.orEmpty(),
+                displayName = user?.displayName.orEmpty().ifBlank { "Usuário A.O.Jarvis" },
+                email = user?.email.orEmpty(),
+                memoriesCount = memCount,
+                commandsCount = cmdCount,
+                sessionsCount = sessCount,
+                isSyncing = syncing,
+                lastSyncMessage = statusMsg,
+                errorMessage = firstError
+            )
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000L),
         initialValue = CloudSyncSummary(
-            userId = currentUserId,
-            displayName = Firebase.auth.currentUser?.displayName.orEmpty(),
-            email = Firebase.auth.currentUser?.email.orEmpty()
+            isAuthenticated = isCloudAuthenticated,
+            userId = currentUserId.orEmpty(),
+            displayName = if (isCloudAuthenticated) Firebase.auth.currentUser?.displayName.orEmpty() else "Modo Local (Sem Conta)",
+            email = if (isCloudAuthenticated) Firebase.auth.currentUser?.email.orEmpty() else "Sincronização em nuvem desativada"
         )
     )
 
@@ -204,8 +245,10 @@ class OpenJarvisViewModel(
         viewModelScope.launch {
             conversationStateManager.ensureDefaultSessionExists()
             offlineVoiceCommandRepository.ensureDefaultCommandsSeeded()
-            Firebase.auth.currentUser?.let { user ->
-                cloudRepository.upsertUserProfile(user)
+            if (isCloudAuthenticated) {
+                Firebase.auth.currentUser?.let { user ->
+                    cloudRepository?.upsertUserProfile(user)
+                }
             }
         }
         viewModelScope.launch {
@@ -593,10 +636,10 @@ class OpenJarvisViewModel(
         networkEngineManager.refreshNetworkState()
     }
 
-    // Session & History management (Local Room + Firestore Cloud Sync)
+    // Session & History management (Local Room + Firestore Cloud Sync when signed in)
     fun createNewSession() = viewModelScope.launch {
         val newId = conversationStateManager.createNewSession()
-        cloudRepository.upsertSession(sessionId = newId, title = "Nova Conversa", messageCount = 0L)
+        cloudRepository?.upsertSession(sessionId = newId, title = "Nova Conversa", messageCount = 0L)
     }
 
     fun switchSession(sessionId: String) = viewModelScope.launch {
@@ -608,7 +651,7 @@ class OpenJarvisViewModel(
             conversationStateManager.clearActiveSession()
         } else {
             conversationStateManager.deleteSession(sessionId)
-            cloudRepository.deleteSession(sessionId)
+            cloudRepository?.deleteSession(sessionId)
         }
     }
 
@@ -652,7 +695,7 @@ class OpenJarvisViewModel(
                 enabled = true
             )
         )
-        cloudRepository.addVoiceCommand(
+        cloudRepository?.addVoiceCommand(
             triggerPhrase = cleanTrigger,
             actionType = actionType,
             actionPayload = cleanPayload,
@@ -664,7 +707,7 @@ class OpenJarvisViewModel(
     fun toggleVoiceCommand(command: VoiceCommandEntity) = viewModelScope.launch {
         val nextEnabled = !command.enabled
         database.voiceCommandDao().updateCommand(command.copy(enabled = nextEnabled))
-        cloudRepository.addVoiceCommand(
+        cloudRepository?.addVoiceCommand(
             triggerPhrase = command.triggerPhrase,
             actionType = command.actionType,
             actionPayload = command.actionPayload,
@@ -675,7 +718,7 @@ class OpenJarvisViewModel(
 
     fun deleteVoiceCommand(id: Long) = viewModelScope.launch {
         database.voiceCommandDao().deleteCommand(id)
-        cloudRepository.deleteVoiceCommand("cmd_$id")
+        cloudRepository?.deleteVoiceCommand("cmd_$id")
     }
 
     // Essential Offline Voice Commands (Local Room Table)
@@ -716,7 +759,7 @@ class OpenJarvisViewModel(
                 category = cleanCategory
             )
         )
-        cloudRepository.addMemory(
+        cloudRepository?.addMemory(
             key = cleanKey,
             content = cleanContent,
             category = cleanCategory,
@@ -726,21 +769,30 @@ class OpenJarvisViewModel(
 
     fun deleteMemory(id: Long) = viewModelScope.launch {
         database.memoryDao().deleteMemory(id)
-        cloudRepository.deleteMemory("mem_$id")
+        cloudRepository?.deleteMemory("mem_$id")
+    }
+
+    fun updateSkipAccountSignIn(skipped: Boolean) = viewModelScope.launch {
+        settingsDataStore.updateSkipAccountSignIn(skipped)
     }
 
     fun syncAllToCloud() = viewModelScope.launch {
+        val repo = cloudRepository
+        if (!isCloudAuthenticated || repo == null) {
+            _cloudStatusMessage.value = "Conecte sua conta Google para sincronizar com o Firestore."
+            return@launch
+        }
         _isCloudSyncing.value = true
         _cloudStatusMessage.value = "Sincronizando dados com o Firebase Firestore…"
         var syncedCount = 0
         var hadError = false
         try {
             Firebase.auth.currentUser?.let { user ->
-                if (cloudRepository.upsertUserProfile(user).isFailure) hadError = true
+                if (repo.upsertUserProfile(user).isFailure) hadError = true
             }
             val localMemories = database.memoryDao().getAllMemories()
             localMemories.forEach { mem ->
-                val res = cloudRepository.addMemory(
+                val res = repo.addMemory(
                     key = mem.key,
                     content = mem.content,
                     category = mem.category,
@@ -750,7 +802,7 @@ class OpenJarvisViewModel(
             }
             val localCommands = voiceCommands.value
             localCommands.forEach { cmd ->
-                val res = cloudRepository.addVoiceCommand(
+                val res = repo.addVoiceCommand(
                     triggerPhrase = cmd.triggerPhrase,
                     actionType = cmd.actionType,
                     actionPayload = cmd.actionPayload,
@@ -762,7 +814,7 @@ class OpenJarvisViewModel(
             val localSessions = sessions.value
             localSessions.forEach { sess ->
                 val count = database.chatMessageDao().countMessagesInSession(sess.id).toLong()
-                val res = cloudRepository.upsertSession(
+                val res = repo.upsertSession(
                     sessionId = sess.id,
                     title = sess.title,
                     messageCount = count

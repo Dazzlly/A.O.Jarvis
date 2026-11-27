@@ -5,10 +5,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -31,6 +37,7 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -49,7 +56,7 @@ class MainActivity : ComponentActivity() {
         // STEP 3: Enable Edge-to-Edge display
         enableEdgeToEdge()
 
-        // STEP 4: Render auth-gated Compose UI
+        // STEP 4: Render auth-gated (with optional local Skip Step) Compose UI
         setContent {
             val assistSignal by assistantLaunchSignal.collectAsState()
             AppAuthRoot(assistantLaunchSignal = assistSignal)
@@ -81,46 +88,101 @@ private fun AppAuthRoot(assistantLaunchSignal: Int) {
     val auth = Firebase.auth
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
     val context = androidx.compose.ui.platform.LocalContext.current
-    val previewSettings by JarvisRuntimeCoordinator.getInstance(context.applicationContext)
-        .settingsDataStore.settingsFlow
-        .collectAsStateWithLifecycle(initialValue = JarvisSettings(themeMode = AppThemeMode.TRON))
+    val scope = rememberCoroutineScope()
+    val settingsDataStore = JarvisRuntimeCoordinator.getInstance(context.applicationContext).settingsDataStore
+    val loadedSettings by settingsDataStore.settingsFlow
+        .collectAsStateWithLifecycle(initialValue = null)
+    val previewSettings = loadedSettings ?: JarvisSettings(themeMode = AppThemeMode.TRON)
 
     val user = currentUser
-    if (user == null) {
-        // Unauthenticated session: render Google Sign-In screen only (no Firestore listeners/ViewModels instantiated)
-        OpenJarvisTheme(
-            themeMode = previewSettings.themeMode,
-            customAccentArgb = previewSettings.customAccentColor
-        ) {
-            JarvisThemeBackdrop(themeMode = previewSettings.themeMode) {
-                AuthScreen(onAuthSuccess = {})
+    when {
+        user != null -> {
+            val uid = user.uid
+            // Key composition & ViewModel by UID so sign-out or account switches cleanly dispose Firestore listeners
+            key(uid) {
+                val viewModel: OpenJarvisViewModel = viewModel(
+                    key = uid,
+                    factory = viewModelFactory {
+                        initializer {
+                            val app = checkNotNull(this[APPLICATION_KEY]) {
+                                "APPLICATION_KEY missing from CreationExtras"
+                            }
+                            val databaseId = app.getString(R.string.firestore_database_id)
+                            val firestore = FirebaseFirestore.getInstance(databaseId)
+                            OpenJarvisViewModel(
+                                application = app,
+                                currentUserId = uid,
+                                cloudRepository = JarvisCloudRepository(firestore)
+                            )
+                        }
+                    }
+                )
+                OpenJarvisApp(
+                    viewModel = viewModel,
+                    assistantLaunchSignal = assistantLaunchSignal
+                )
             }
         }
-    } else {
-        val uid = user.uid
-        // Key composition & ViewModel by UID so sign-out or account switches cleanly dispose Firestore listeners
-        key(uid) {
-            val viewModel: OpenJarvisViewModel = viewModel(
-                key = uid,
-                factory = viewModelFactory {
-                    initializer {
-                        val app = checkNotNull(this[APPLICATION_KEY]) {
-                            "APPLICATION_KEY missing from CreationExtras"
-                        }
-                        val databaseId = app.getString(R.string.firestore_database_id)
-                        val firestore = FirebaseFirestore.getInstance(databaseId)
-                        OpenJarvisViewModel(
-                            application = app,
-                            currentUserId = uid,
-                            cloudRepository = JarvisCloudRepository(firestore)
-                        )
+
+        loadedSettings == null -> {
+            // Brief splash while DataStore resolves whether the user previously skipped sign-in
+            OpenJarvisTheme(
+                themeMode = previewSettings.themeMode,
+                customAccentArgb = previewSettings.customAccentColor
+            ) {
+                JarvisThemeBackdrop(themeMode = previewSettings.themeMode) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
                     }
                 }
-            )
-            OpenJarvisApp(
-                viewModel = viewModel,
-                assistantLaunchSignal = assistantLaunchSignal
-            )
+            }
+        }
+
+        loadedSettings!!.skipAccountSignIn -> {
+            // Local/Guest mode: zero Firestore listeners or cloud calls; local Room, voice & offline tools work normally
+            key("guest_local_mode") {
+                val viewModel: OpenJarvisViewModel = viewModel(
+                    key = "guest_local_mode",
+                    factory = viewModelFactory {
+                        initializer {
+                            val app = checkNotNull(this[APPLICATION_KEY]) {
+                                "APPLICATION_KEY missing from CreationExtras"
+                            }
+                            OpenJarvisViewModel(
+                                application = app,
+                                currentUserId = null,
+                                cloudRepository = null
+                            )
+                        }
+                    }
+                )
+                OpenJarvisApp(
+                    viewModel = viewModel,
+                    assistantLaunchSignal = assistantLaunchSignal
+                )
+            }
+        }
+
+        else -> {
+            // Unauthenticated first-launch screen: Google Sign-In + Skip Step (Continue without account)
+            OpenJarvisTheme(
+                themeMode = previewSettings.themeMode,
+                customAccentArgb = previewSettings.customAccentColor
+            ) {
+                JarvisThemeBackdrop(themeMode = previewSettings.themeMode) {
+                    AuthScreen(
+                        onAuthSuccess = {
+                            scope.launch { settingsDataStore.updateSkipAccountSignIn(false) }
+                        },
+                        onSkipSignIn = {
+                            scope.launch { settingsDataStore.updateSkipAccountSignIn(true) }
+                        }
+                    )
+                }
+            }
         }
     }
 }

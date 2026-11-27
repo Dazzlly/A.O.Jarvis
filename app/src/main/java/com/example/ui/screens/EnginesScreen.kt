@@ -183,6 +183,7 @@ fun EnginesScreen(
     onOpenDevicePanel: (String) -> IntegrationResult,
     cloudSyncSummary: CloudSyncSummary,
     onSyncCloudNow: () -> Unit,
+    onSignInGoogle: () -> Unit,
     onSignOutGoogle: () -> Unit,
     defaultAssistantStatus: DefaultAssistantStatus,
     onRefreshDefaultAssistant: () -> Unit,
@@ -240,6 +241,7 @@ fun EnginesScreen(
             CloudAccountCard(
                 cloudSyncSummary = cloudSyncSummary,
                 onSyncNow = onSyncCloudNow,
+                onSignInGoogle = onSignInGoogle,
                 onSignOut = onSignOutGoogle
             )
         }

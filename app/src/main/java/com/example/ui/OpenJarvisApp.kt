@@ -78,6 +78,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.cloud.onGoogleSignInClicked
 import com.example.cloud.signOutWithCredentialClear
 import com.example.core.AppDestination
 import com.example.core.AppUiCommand
@@ -729,7 +730,22 @@ fun OpenJarvisApp(
                                     onOpenDevicePanel = { viewModel.openDeviceSystemPanel(it) },
                                     cloudSyncSummary = cloudSyncSummary,
                                     onSyncCloudNow = { viewModel.syncAllToCloud() },
+                                    onSignInGoogle = {
+                                        onGoogleSignInClicked(
+                                            context = context,
+                                            credentialManager = credentialManager,
+                                            onAuthSuccess = {
+                                                viewModel.updateSkipAccountSignIn(false)
+                                                Toast.makeText(context, "Conta Google conectada!", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onAuthError = { msg ->
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            },
+                                            scope = scope
+                                        )
+                                    },
                                     onSignOutGoogle = {
+                                        viewModel.updateSkipAccountSignIn(false)
                                         signOutWithCredentialClear(
                                             credentialManager = credentialManager,
                                             scope = scope,

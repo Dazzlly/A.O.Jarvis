@@ -3,3 +3,4 @@
 - Serviço Speech-to-Text (SpeechRecognizer nativo) integrado ao pipeline Gemini com captura de nível de confiança (STT) e buffer de amplitude em tempo real.
 - Novo visualizador de forma de onda (Waveform) em Canvas/Jetpack Compose que reage ao vivo à entrada do microfone durante a escuta.
 - Novo histórico local de comandos de voz em SQLite/Room (migração automática v3 → v4) com busca, repetição de comando e leitura em voz alta na aba Histórico & Telemetria.
+- Nova opção "Continuar sem conta (Pular)" na tela inicial para usar o aplicativo em modo local sem login Google (com recursos de nuvem desativados até conectar uma conta).

@@ -62,6 +62,7 @@ sealed interface CloudUiState<out T> {
 }
 
 data class CloudSyncSummary(
+    val isAuthenticated: Boolean = true,
     val userId: String = "",
     val displayName: String = "",
     val email: String = "",
