@@ -1,0 +1,4 @@
+• Fixed illegible black page titles across dark themes (Tron, Obsidian, and Custom).
+• Fixed "Hey Jarvis" wake-word & Speech-to-Text pipeline so spoken commands execute reliably instead of being discarded, with activation chime, partial-transcript recovery, and automatic offline-to-online STT fallback.
+• Improved Text-to-Speech reliability using media audio routing, transient audio focus, and completion watchdog.
+• Added in-app google-services.json import and raw GOOGLE_SERVICES_JSON secret support in GitHub Actions to enable Firebase Auth, Firestore, and Gemini Cloud in CI/F-Droid builds.

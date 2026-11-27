@@ -153,7 +153,10 @@ fun TtsSettingsScreen(
     ) {
         TopAppBar(
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = Color.Transparent
+                containerColor = Color.Transparent,
+                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                actionIconContentColor = MaterialTheme.colorScheme.onBackground
             ),
             navigationIcon = {
                 IconButton(
@@ -171,6 +174,7 @@ fun TtsSettingsScreen(
                     Text(
                         text = stringResource(R.string.tts_settings_title),
                         style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

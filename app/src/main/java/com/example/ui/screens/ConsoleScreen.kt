@@ -958,7 +958,8 @@ private fun EmptyConsolePlaceholder(
         Spacer(modifier = Modifier.height(14.dp))
         Text(
             text = if (isListening) "A.O.Jarvis Ouvindo…" else "A.O.Jarvis Pronto",
-            style = MaterialTheme.typography.headlineSmall
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
@@ -1415,6 +1416,7 @@ private fun GeminiLiveVoicePanel(
                 is LiveVoiceState.Error -> "Sessão interrompida"
             },
             style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center
         )
 

@@ -191,9 +191,11 @@ fun EnginesScreen(
     onToggleDeviceDnd: (Boolean) -> IntegrationResult,
     onOpenDevicePanel: (String) -> IntegrationResult,
     cloudSyncSummary: CloudSyncSummary,
+    isFirebaseAvailable: Boolean = true,
     onSyncCloudNow: () -> Unit,
     onSignInGoogle: () -> Unit,
     onSignOutGoogle: () -> Unit,
+    onImportGoogleServicesJson: () -> Unit = {},
     defaultAssistantStatus: DefaultAssistantStatus,
     onRefreshDefaultAssistant: () -> Unit,
     onRequestSetDefaultAssistant: () -> Unit,
@@ -235,7 +237,8 @@ fun EnginesScreen(
             Column {
                 Text(
                     text = "Motores & Inteligência",
-                    style = MaterialTheme.typography.headlineMedium
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     text = "Configure conta Firebase, Assistente Padrão, roteamento entre Ollama LAN, Gemini Cloud e comandos offline.",
@@ -249,9 +252,11 @@ fun EnginesScreen(
         item {
             CloudAccountCard(
                 cloudSyncSummary = cloudSyncSummary,
+                isFirebaseAvailable = isFirebaseAvailable,
                 onSyncNow = onSyncCloudNow,
                 onSignInGoogle = onSignInGoogle,
-                onSignOut = onSignOutGoogle
+                onSignOut = onSignOutGoogle,
+                onImportGoogleServicesJson = onImportGoogleServicesJson
             )
         }
 

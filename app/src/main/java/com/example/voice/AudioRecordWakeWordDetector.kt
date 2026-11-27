@@ -29,10 +29,11 @@ import kotlin.math.sqrt
 private const val TAG = "AudioRecordWakeWord"
 private const val SAMPLE_RATE_HZ = 16_000
 private const val FRAME_SAMPLES = 320 // 20 ms at 16 kHz
-private const val MIN_SPEECH_MS = 220L
-private const val MAX_SPEECH_WINDOW_MS = 1_400L
-private const val END_SILENCE_MS = 240L
+private const val MIN_SPEECH_MS = 200L
+private const val MAX_SPEECH_WINDOW_MS = 1_150L
+private const val END_SILENCE_MS = 150L
 private const val TRIGGER_COOLDOWN_MS = 1_500L
+private const val AUDIO_HAL_RELEASE_DELAY_MS = 180L
 
 data class WakeWordDetectorState(
     val isMonitoring: Boolean = false,
@@ -305,9 +306,11 @@ class AudioRecordWakeWordDetector(private val context: Context) {
                                     isMonitoring = false,
                                     isVerifyingPhrase = true,
                                     normalizedLevel = 0f,
-                                    statusText = "Voz detectada — confirmando \"$wakePhrase\"…"
+                                    statusText = "Voz detectada — abrindo microfone…"
                                 )
                             }
+                            // Allow Android AudioFlinger / OEM HAL to release mic handle before SpeechRecognizer binds
+                            delay(AUDIO_HAL_RELEASE_DELAY_MS)
                             onCandidateDetected()
                             return
                         }

@@ -90,6 +90,7 @@ fun AuthScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         contentWindowInsets = WindowInsets.safeDrawing,
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->

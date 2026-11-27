@@ -374,7 +374,11 @@ class JarvisBackgroundService : Service() {
                 onCandidateDetected = {
                     serviceScope.launch {
                         if (!isPaused && voiceEnabledInService) {
-                            beginSpeechRecognizerSession(settings, lanSuffix)
+                            beginSpeechRecognizerSession(
+                                settings = settings,
+                                lanSuffix = lanSuffix,
+                                triggeredByAudioRecord = true
+                            )
                         }
                     }
                 }
@@ -382,21 +386,29 @@ class JarvisBackgroundService : Service() {
             return
         }
 
-        beginSpeechRecognizerSession(settings, lanSuffix)
+        beginSpeechRecognizerSession(settings, lanSuffix, triggeredByAudioRecord = false)
     }
 
-    private fun beginSpeechRecognizerSession(settings: JarvisSettings, lanSuffix: String) {
+    private fun beginSpeechRecognizerSession(
+        settings: JarvisSettings,
+        lanSuffix: String,
+        triggeredByAudioRecord: Boolean = false
+    ) {
         coordinator.wakeWordDetector.stopMonitoring()
+        if (triggeredByAudioRecord) {
+            speechController.playActivationChime()
+        }
         val label = when {
             awaitingDirectCommand -> "Conversa contínua — pode falar$lanSuffix"
-            settings.wakeWordEnabled -> "Confirmando \"${settings.wakeWord}\"$lanSuffix"
+            triggeredByAudioRecord -> "Hey Jarvis ativado — pode falar$lanSuffix"
+            settings.wakeWordEnabled -> "Aguardando \"${settings.wakeWord}\"$lanSuffix"
             else -> "Ouvindo comando de voz$lanSuffix"
         }
 
-        val phase = if (settings.wakeWordEnabled && !awaitingDirectCommand) {
+        val phase = if (settings.wakeWordEnabled && !awaitingDirectCommand && !triggeredByAudioRecord) {
             AssistantPhase.ListeningWakeWord(settings.wakeWord)
         } else {
-            AssistantPhase.ListeningCommand(isFollowUp = awaitingDirectCommand)
+            AssistantPhase.ListeningCommand(isFollowUp = awaitingDirectCommand || triggeredByAudioRecord)
         }
         coordinator.conversationStateManager.updatePhase(
             phase = phase,
@@ -439,7 +451,11 @@ class JarvisBackgroundService : Service() {
                         lastSttConfidence = lastSttConfidence
                     )
                 }
-                handleSpokenTranscript(transcript, lastSttConfidence)
+                handleSpokenTranscript(
+                    rawTranscript = transcript,
+                    sttConfidence = lastSttConfidence,
+                    triggeredByAudioRecord = triggeredByAudioRecord
+                )
             },
             onRms = { rms ->
                 coordinator.updateVoiceState { it.copy(rmsDb = rms) }
@@ -486,7 +502,11 @@ class JarvisBackgroundService : Service() {
         )
     }
 
-    private fun handleSpokenTranscript(rawTranscript: String, sttConfidence: Float = -1f) {
+    private fun handleSpokenTranscript(
+        rawTranscript: String,
+        sttConfidence: Float = -1f,
+        triggeredByAudioRecord: Boolean = false
+    ) {
         dispatchJob?.cancel()
         dispatchJob = serviceScope.launch {
             try {
@@ -530,10 +550,7 @@ class JarvisBackgroundService : Service() {
 
                 val promptToExecute: String? = if (settings.wakeWordEnabled && !awaitingDirectCommand) {
                     val wakeMatch = AudioRecordWakeWordDetector.matchWakePhrase(rawTranscript, settings.wakeWord)
-                    if (!wakeMatch.matched) {
-                        coordinator.wakeWordDetector.setVerifyingPhrase(false)
-                        null
-                    } else {
+                    if (wakeMatch.matched) {
                         coordinator.wakeWordDetector.recordSuccessfulDetection(rawTranscript)
                         val afterWake = wakeMatch.inlineCommand
                         if (afterWake.isEmpty()) {
@@ -551,13 +568,23 @@ class JarvisBackgroundService : Service() {
                                 followUpWindowActive = true
                             )
                             updateNotification("Pronto — diga o comando")
-                            speakAndAwait("Sim, pode falar.")
+                            if (settings.autoSpeakResponses) {
+                                speakAndAwait("Sim, pode falar.")
+                            }
                             coordinator.updateVoiceState { it.copy(isSpeaking = false) }
-                            scheduleNextListen(delayMs = 200L)
+                            scheduleNextListen(delayMs = 280L)
                             return@launch
                         } else {
                             afterWake
                         }
+                    } else if (triggeredByAudioRecord && rawTranscript.trim().length >= 3) {
+                        // Stage-1 AudioRecord already consumed the "Hey Jarvis" burst before SpeechRecognizer
+                        // opened, so execute the spoken command instead of silently dropping it.
+                        coordinator.wakeWordDetector.recordSuccessfulDetection(rawTranscript)
+                        rawTranscript.trim()
+                    } else {
+                        coordinator.wakeWordDetector.setVerifyingPhrase(false)
+                        null
                     }
                 } else {
                     rawTranscript
@@ -791,6 +818,8 @@ class JarvisBackgroundService : Service() {
                 speechController.stopSpeaking()
             }
         }
+        // Brief acoustic tail cooldown so TTS speaker audio doesn't immediately re-trigger the mic
+        delay(250L)
     }
 
     private fun promoteToForeground(statusText: String, includeMicrophone: Boolean) {

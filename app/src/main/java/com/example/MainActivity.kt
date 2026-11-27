@@ -25,6 +25,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.ai.configureAppCheck
 import com.example.assistant.EXTRA_TRIGGERED_AS_ASSISTANT
+import com.example.cloud.FirebaseRuntimeConfig
 import com.example.cloud.JarvisCloudRepository
 import com.example.cloud.authStateFlow
 import com.example.cloud.getFirebaseAuthOrNull
@@ -52,7 +53,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // STEP 1: Configure Firebase App Check with launch intent before UI, ViewModels, or Firebase calls
+        // STEP 1: Initialize Firebase (build-time google-services.json or runtime-imported config) & App Check
+        runCatching { FirebaseRuntimeConfig.ensureFirebaseInitialized(this) }
         runCatching { configureAppCheck(this, intent) }
             .onFailure { Log.w(MAIN_TAG, "AppCheck init skipped: ${it.message}") }
 
@@ -93,7 +95,8 @@ class MainActivity : ComponentActivity() {
 private fun AppAuthRoot(assistantLaunchSignal: Int) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val auth = remember(context) { getFirebaseAuthOrNull(context) }
+    val firebaseConfigRevision by FirebaseRuntimeConfig.configRevision.collectAsStateWithLifecycle()
+    val auth = remember(context, firebaseConfigRevision) { getFirebaseAuthOrNull(context) }
     val authFlow = remember(auth) { auth?.authStateFlow() ?: flowOf(null) }
     val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = auth?.currentUser)
 

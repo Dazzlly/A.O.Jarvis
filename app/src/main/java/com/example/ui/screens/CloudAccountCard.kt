@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Login
 import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,9 +38,11 @@ import com.example.cloud.CloudSyncSummary
 @Composable
 fun CloudAccountCard(
     cloudSyncSummary: CloudSyncSummary,
+    isFirebaseAvailable: Boolean = true,
     onSyncNow: () -> Unit,
     onSignInGoogle: () -> Unit,
     onSignOut: () -> Unit,
+    onImportGoogleServicesJson: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -56,17 +59,30 @@ fun CloudAccountCard(
                     Icon(
                         imageVector = Icons.Rounded.CloudOff,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (isFirebaseAvailable) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.secondary
+                        },
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Modo Local (Sem Conta)",
-                            style = MaterialTheme.typography.titleMedium
+                            text = if (isFirebaseAvailable) {
+                                "Modo Local (Sem Conta)"
+                            } else {
+                                "Firebase não configurado neste APK"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Backup e sincronização em nuvem desativados",
+                            text = if (isFirebaseAvailable) {
+                                "Backup e sincronização em nuvem desativados"
+                            } else {
+                                "Importe google-services.json para ativar Google Login, Firestore e Gemini Cloud"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -81,7 +97,11 @@ fun CloudAccountCard(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Você pulou o login com Google. Seus comandos, memórias e histórico de voz ficam salvos apenas neste dispositivo. Conecte sua conta Google quando quiser liberar sincronização e backup no Firestore.",
+                        text = if (isFirebaseAvailable) {
+                            "Você pulou o login com Google. Seus comandos, memórias e histórico de voz ficam salvos apenas neste dispositivo. Conecte sua conta Google quando quiser liberar sincronização e backup no Firestore."
+                        } else {
+                            "Este APK foi compilado sem o arquivo app/google-services.json. Você pode ativar o Firebase agora mesmo importando o arquivo google-services.json neste aparelho ou configurando o secret GOOGLE_SERVICES_JSON no GitHub Actions."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp)
@@ -90,20 +110,54 @@ fun CloudAccountCard(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Button(
-                    onClick = onSignInGoogle,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("connect_google_account_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Login,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Entrar com Google")
+                if (!isFirebaseAvailable) {
+                    Button(
+                        onClick = onImportGoogleServicesJson,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("import_google_services_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.UploadFile,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Importar google-services.json")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onSignInGoogle,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("connect_google_account_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Login,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Entrar com Google")
+                    }
+                } else {
+                    Button(
+                        onClick = onSignInGoogle,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("connect_google_account_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Login,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Entrar com Google")
+                    }
                 }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -117,7 +171,8 @@ fun CloudAccountCard(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = cloudSyncSummary.displayName.ifBlank { "Conta Google Conectada" },
-                            style = MaterialTheme.typography.titleMedium
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = cloudSyncSummary.email.ifBlank { "Firebase Auth · Firestore Sync" },

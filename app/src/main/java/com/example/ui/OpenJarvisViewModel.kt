@@ -405,6 +405,8 @@ class OpenJarvisViewModel(
         promptJob = viewModelScope.launch {
             val currentSettings = settings.value
             val shouldSpeak = speakReply ?: currentSettings.autoSpeakResponses
+            val isVoiceInitiated = commandSource == CommandSource.VOICE_STT || commandSource == CommandSource.VOICE_BG
+            var didTriggerSpeech = false
             val initialEngine = when (currentSettings.routingMode) {
                 RoutingMode.OLLAMA -> EngineType.OLLAMA
                 RoutingMode.OFFLINE -> EngineType.OFFLINE
@@ -434,12 +436,17 @@ class OpenJarvisViewModel(
                         is InferenceStreamEvent.Completed -> {
                             _streamingState.value = StreamingUiState.Idle
                             if (shouldSpeak && event.fullText.isNotBlank()) {
+                                didTriggerSpeech = true
                                 speakText(event.fullText)
                             }
                         }
 
                         is InferenceStreamEvent.Error -> {
                             _streamingState.value = StreamingUiState.Error(event.message)
+                            if (shouldSpeak && isVoiceInitiated && event.message.isNotBlank()) {
+                                didTriggerSpeech = true
+                                speakText(event.message)
+                            }
                         }
                     }
                 }
@@ -447,33 +454,50 @@ class OpenJarvisViewModel(
                 _streamingState.value = StreamingUiState.Idle
                 throw e
             } catch (e: Exception) {
-                _streamingState.value = StreamingUiState.Error(
-                    e.localizedMessage ?: "Erro inesperado ao processar solicitação."
-                )
+                val errMsg = e.localizedMessage ?: "Erro inesperado ao processar solicitação."
+                _streamingState.value = StreamingUiState.Error(errMsg)
+                if (shouldSpeak && isVoiceInitiated) {
+                    didTriggerSpeech = true
+                    speakText(errMsg)
+                }
             } finally {
                 if (_streamingState.value is StreamingUiState.Streaming) {
                     _streamingState.value = StreamingUiState.Idle
                 }
-                if (!voiceState.value.isSpeaking && !isTtsSpeaking.value) {
-                    scheduleForegroundWakeWordResume(delayMs = 500L)
+                if (!didTriggerSpeech &&
+                    !voiceState.value.isSpeaking &&
+                    !isTtsSpeaking.value &&
+                    !voiceState.value.isListening
+                ) {
+                    coordinator.updateVoiceState {
+                        it.copy(statusText = "Pronto para escutar")
+                    }
+                    scheduleForegroundWakeWordResume(delayMs = 550L)
                 }
             }
         }
     }
 
-    fun speakText(text: String) {
-        if (text.isBlank()) return
+    fun speakText(text: String, onFinished: (() -> Unit)? = null) {
+        if (text.isBlank()) {
+            onFinished?.invoke()
+            return
+        }
         pauseForegroundWakeWord("A.O.Jarvis falando…")
         conversationStateManager.updatePhase(AssistantPhase.Speaking(text.take(60)))
         coordinator.updateVoiceState {
-            it.copy(isSpeaking = true, statusText = "A.O.Jarvis falando…")
+            it.copy(isListening = false, isSpeaking = true, statusText = "A.O.Jarvis falando…")
         }
         speechController.speak(text) {
             conversationStateManager.updatePhase(AssistantPhase.Idle)
             coordinator.updateVoiceState {
                 it.copy(isSpeaking = false, statusText = "Pronto para escutar")
             }
-            scheduleForegroundWakeWordResume(delayMs = 450L)
+            if (onFinished != null) {
+                onFinished()
+            } else {
+                scheduleForegroundWakeWordResume(delayMs = 550L)
+            }
         }
     }
 
@@ -670,6 +694,7 @@ class OpenJarvisViewModel(
             !currentSettings.audioRecordWakeWordEnabled ||
             voiceState.value.isBackgroundRunning ||
             voiceState.value.isListening ||
+            voiceState.value.isSpeaking ||
             isTtsSpeaking.value
         ) {
             wakeWordDetector.setVerifyingPhrase(false)
@@ -677,46 +702,101 @@ class OpenJarvisViewModel(
         }
 
         isVerifyingForegroundWakeWord = true
-        wakeWordDetector.setVerifyingPhrase(true, "Confirmando \"${currentSettings.wakeWord}\"…")
-        var capturedConfidence = -1f
-        var alreadyTriggered = false
+        wakeWordDetector.setVerifyingPhrase(true, "Hey Jarvis ativado — ouvindo…")
+        speechController.playActivationChime()
+        conversationStateManager.updatePhase(AssistantPhase.ListeningCommand(isFollowUp = true))
+        coordinator.updateVoiceState {
+            it.copy(
+                isListening = true,
+                isSpeaking = false,
+                errorMessage = null,
+                partialTranscript = "",
+                statusText = "Hey Jarvis ativado — pode falar!"
+            )
+        }
 
+        var capturedConfidence = -1f
         speechController.startListening(
             preferOffline = currentSettings.preferOfflineStt,
-            onPartial = { partial ->
-                if (alreadyTriggered) return@startListening
-                val match = AudioRecordWakeWordDetector.matchWakePhrase(partial, currentSettings.wakeWord)
-                if (match.matched && match.inlineCommand.isBlank()) {
-                    // Immediate hands-free wake on "Hey Jarvis" partial recognition without waiting for long timeout
-                    alreadyTriggered = true
-                    speechController.stopListening()
-                    onForegroundWakeWordConfirmed(rawTranscript = partial, inlineCommand = "", confidence = capturedConfidence)
+            onReady = {
+                coordinator.updateVoiceState {
+                    it.copy(isListening = true, statusText = "Hey Jarvis ativado — pode falar!")
                 }
             },
+            onPartial = { partial ->
+                coordinator.updateVoiceState { it.copy(partialTranscript = partial) }
+            },
             onFinal = { transcript ->
-                if (alreadyTriggered) return@startListening
-                val match = AudioRecordWakeWordDetector.matchWakePhrase(transcript, currentSettings.wakeWord)
-                if (match.matched) {
-                    alreadyTriggered = true
-                    onForegroundWakeWordConfirmed(
-                        rawTranscript = transcript,
-                        inlineCommand = match.inlineCommand,
-                        confidence = capturedConfidence
+                isVerifyingForegroundWakeWord = false
+                coordinator.updateVoiceState {
+                    it.copy(
+                        isListening = false,
+                        rmsDb = 0f,
+                        partialTranscript = "",
+                        lastSttConfidence = capturedConfidence,
+                        statusText = "Processando comando…"
                     )
-                } else {
-                    isVerifyingForegroundWakeWord = false
-                    wakeWordDetector.setVerifyingPhrase(false)
-                    scheduleForegroundWakeWordResume(delayMs = 350L)
                 }
+
+                val match = AudioRecordWakeWordDetector.matchWakePhrase(transcript, currentSettings.wakeWord)
+                when {
+                    match.matched && match.inlineCommand.isNotBlank() -> {
+                        onForegroundWakeWordConfirmed(
+                            rawTranscript = transcript,
+                            inlineCommand = match.inlineCommand,
+                            confidence = capturedConfidence
+                        )
+                    }
+
+                    match.matched && match.inlineCommand.isBlank() -> {
+                        // User spoke only "Hey Jarvis" -> confirm by voice and then open command mic
+                        onForegroundWakeWordConfirmed(
+                            rawTranscript = transcript,
+                            inlineCommand = "",
+                            confidence = capturedConfidence
+                        )
+                    }
+
+                    else -> {
+                        // AudioRecord already consumed the initial "Hey Jarvis" burst before SpeechRecognizer
+                        // opened, so this transcript IS the user's command — execute it instead of dropping it!
+                        wakeWordDetector.recordSuccessfulDetection(transcript)
+                        sendPrompt(
+                            prompt = transcript,
+                            sourceTag = CommandSource.VOICE_STT.tag,
+                            speakReply = currentSettings.autoSpeakResponses,
+                            sttConfidence = capturedConfidence
+                        )
+                    }
+                }
+            },
+            onRms = { rms ->
+                coordinator.updateVoiceState { it.copy(rmsDb = rms) }
             },
             onConfidence = { conf ->
                 capturedConfidence = conf
             },
-            onError = { _, _ ->
-                if (alreadyTriggered) return@startListening
+            onError = { code, msg ->
                 isVerifyingForegroundWakeWord = false
                 wakeWordDetector.setVerifyingPhrase(false)
-                scheduleForegroundWakeWordResume(delayMs = 450L)
+                val displayError = if (code == SpeechRecognizer.ERROR_NO_MATCH || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    null
+                } else {
+                    msg
+                }
+                conversationStateManager.updatePhase(
+                    if (displayError != null) AssistantPhase.Error(displayError) else AssistantPhase.Idle
+                )
+                coordinator.updateVoiceState {
+                    it.copy(
+                        isListening = false,
+                        rmsDb = 0f,
+                        partialTranscript = "",
+                        statusText = "Pronto para escutar",
+                        errorMessage = displayError
+                    )
+                }
+                scheduleForegroundWakeWordResume(delayMs = 500L)
             }
         )
     }
@@ -737,9 +817,18 @@ class OpenJarvisViewModel(
                 speakReply = currentSettings.autoSpeakResponses,
                 sttConfidence = confidence
             )
+        } else if (currentSettings.autoSpeakResponses) {
+            speakText("Sim, pode falar.") {
+                viewModelScope.launch {
+                    delay(240L)
+                    startDirectVoiceListening(triggeredByWakeWord = true)
+                }
+            }
         } else {
-            // Automatically activate full assistant command listening hands-free!
-            startDirectVoiceListening(triggeredByWakeWord = true)
+            viewModelScope.launch {
+                delay(200L)
+                startDirectVoiceListening(triggeredByWakeWord = true)
+            }
         }
     }
 
@@ -764,6 +853,7 @@ class OpenJarvisViewModel(
     }
 
     private fun startDirectVoiceListening(triggeredByWakeWord: Boolean) {
+        val wasMonitoringWake = wakeWordDetector.state.value.isMonitoring
         pauseForegroundWakeWord(if (triggeredByWakeWord) "Ativado por \"Hey Jarvis\"" else "Microfone manual ativo")
         stopLiveSession()
         speechController.stopSpeaking()
@@ -783,58 +873,67 @@ class OpenJarvisViewModel(
             )
         }
 
-        var capturedConfidence = -1f
-        speechController.startListening(
-            preferOffline = currentSettings.preferOfflineStt,
-            onReady = {
-                coordinator.updateVoiceState { it.copy(isListening = true) }
-            },
-            onPartial = { partial ->
-                coordinator.updateVoiceState { it.copy(partialTranscript = partial) }
-            },
-            onFinal = { transcript ->
-                coordinator.updateVoiceState {
-                    it.copy(
-                        isListening = false,
-                        rmsDb = 0f,
-                        partialTranscript = "",
-                        lastSttConfidence = capturedConfidence,
-                        statusText = "Processando comando…"
-                    )
-                }
-                sendPrompt(
-                    prompt = transcript,
-                    sourceTag = CommandSource.VOICE_STT.tag,
-                    speakReply = currentSettings.autoSpeakResponses,
-                    sttConfidence = capturedConfidence
-                )
-            },
-            onRms = { rms ->
-                coordinator.updateVoiceState { it.copy(rmsDb = rms) }
-            },
-            onConfidence = { confidence ->
-                capturedConfidence = confidence
-            },
-            onError = { code, msg ->
-                val displayError = if (code == SpeechRecognizer.ERROR_NO_MATCH || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    null
-                } else {
-                    msg
-                }
-                conversationStateManager.updatePhase(
-                    if (displayError != null) AssistantPhase.Error(displayError) else AssistantPhase.Idle
-                )
-                coordinator.updateVoiceState {
-                    it.copy(
-                        isListening = false,
-                        rmsDb = 0f,
-                        statusText = "Pronto para escutar",
-                        errorMessage = displayError
-                    )
-                }
-                scheduleForegroundWakeWordResume(delayMs = 500L)
+        viewModelScope.launch {
+            // Ensure AudioRecord HAL has released the mic before SpeechRecognizer binds
+            if (wasMonitoringWake) {
+                delay(180L)
             }
-        )
+            if (!voiceState.value.isListening) return@launch
+
+            var capturedConfidence = -1f
+            speechController.startListening(
+                preferOffline = currentSettings.preferOfflineStt,
+                onReady = {
+                    coordinator.updateVoiceState { it.copy(isListening = true) }
+                },
+                onPartial = { partial ->
+                    coordinator.updateVoiceState { it.copy(partialTranscript = partial) }
+                },
+                onFinal = { transcript ->
+                    coordinator.updateVoiceState {
+                        it.copy(
+                            isListening = false,
+                            rmsDb = 0f,
+                            partialTranscript = "",
+                            lastSttConfidence = capturedConfidence,
+                            statusText = "Processando comando…"
+                        )
+                    }
+                    sendPrompt(
+                        prompt = transcript,
+                        sourceTag = CommandSource.VOICE_STT.tag,
+                        speakReply = currentSettings.autoSpeakResponses,
+                        sttConfidence = capturedConfidence
+                    )
+                },
+                onRms = { rms ->
+                    coordinator.updateVoiceState { it.copy(rmsDb = rms) }
+                },
+                onConfidence = { confidence ->
+                    capturedConfidence = confidence
+                },
+                onError = { code, msg ->
+                    val displayError = if (code == SpeechRecognizer.ERROR_NO_MATCH || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        null
+                    } else {
+                        msg
+                    }
+                    conversationStateManager.updatePhase(
+                        if (displayError != null) AssistantPhase.Error(displayError) else AssistantPhase.Idle
+                    )
+                    coordinator.updateVoiceState {
+                        it.copy(
+                            isListening = false,
+                            rmsDb = 0f,
+                            partialTranscript = "",
+                            statusText = "Pronto para escutar",
+                            errorMessage = displayError
+                        )
+                    }
+                    scheduleForegroundWakeWordResume(delayMs = 500L)
+                }
+            )
+        }
     }
 
     fun toggleBackgroundService() {

@@ -3,6 +3,10 @@ package com.example.voice
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "NativeSpeechController"
 private const val MAX_TTS_CHUNK_CHARS = 650
@@ -51,13 +56,19 @@ private data class PendingSpeech(
 
 /**
  * Controlador unificado de Speech-to-Text (SpeechRecognizer nativo) e Text-to-Speech (TTS).
- * Corrige race conditions de inicialização, fallback de idioma pt-BR, quebra de respostas longas
- * em múltiplos chunks com callback confiável e atributos de áudio de assistente.
+ * Inclui token de sessão STT contra callbacks obsoletos, fallback automático de transcrição parcial,
+ * fallback de STT offline->online, AudioFocus de mídia para audibilidade confiável em aparelhos Samsung
+ * e watchdog de conclusão de TTS para nunca travar o ciclo de escuta.
  */
 class NativeSpeechController(private val context: Context) {
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioManager = runCatching {
+        appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    }.getOrNull()
+
+    private val listeningSessionCounter = AtomicLong(0L)
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -66,6 +77,8 @@ class NativeSpeechController(private val context: Context) {
     private var pendingSpeech: PendingSpeech? = null
     private var finalUtteranceId: String? = null
     private var onTtsComplete: (() -> Unit)? = null
+    private var ttsWatchdogRunnable: Runnable? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
     private var ttsConfig: TtsEngineConfig = TtsEngineConfig()
     private var systemVoiceMap: Map<String, Voice> = emptyMap()
 
@@ -88,7 +101,7 @@ class NativeSpeechController(private val context: Context) {
     val lastConfidence: StateFlow<Float> = _lastConfidence.asStateFlow()
 
     val isSpeechRecognitionAvailable: Boolean
-        get() = SpeechRecognizer.isRecognitionAvailable(appContext)
+        get() = runCatching { SpeechRecognizer.isRecognitionAvailable(appContext) }.getOrDefault(false)
 
     init {
         initTtsEngine()
@@ -109,8 +122,18 @@ class NativeSpeechController(private val context: Context) {
         _waveformSamples.value = List(WAVEFORM_BAR_COUNT) { 0.08f }
     }
 
+    fun playActivationChime() {
+        runCatching {
+            val toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 65)
+            toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 95)
+            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 180L)
+        }
+    }
+
     fun reinitializeTts() {
         mainHandler.post {
+            clearTtsWatchdog()
+            abandonTtsAudioFocus()
             runCatching { tts?.stop() }
             runCatching { tts?.shutdown() }
             tts = null
@@ -165,6 +188,7 @@ class NativeSpeechController(private val context: Context) {
             onComplete?.let { mainHandler.post(it) }
             return
         }
+        _isSpeaking.value = true
         mainHandler.post {
             val engine = tts
             if (!ttsReady || engine == null) {
@@ -192,54 +216,56 @@ class NativeSpeechController(private val context: Context) {
                         val engine = tts ?: return@post
                         runCatching { loadAvailableVoices(engine) }
                         runCatching { configureTtsAudioAndLocale(engine, "pt-BR") }
-                    engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) {
-                            _isSpeaking.value = true
-                        }
-
-                        override fun onDone(utteranceId: String?) {
-                            if (utteranceId == null || utteranceId == finalUtteranceId) {
-                                finishSpeakingCallback()
+                        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String?) {
+                                _isSpeaking.value = true
                             }
-                        }
 
-                        @Deprecated("Deprecated in Android API")
-                        override fun onError(utteranceId: String?) {
-                            if (utteranceId == null || utteranceId == finalUtteranceId) {
-                                finishSpeakingCallback()
+                            override fun onDone(utteranceId: String?) {
+                                if (utteranceId == null || utteranceId == finalUtteranceId) {
+                                    finishSpeakingCallback()
+                                }
                             }
-                        }
 
-                        override fun onError(utteranceId: String?, errorCode: Int) {
-                            Log.w(TAG, "TTS utterance error code=$errorCode")
-                            if (utteranceId == null || utteranceId == finalUtteranceId) {
-                                finishSpeakingCallback()
+                            @Deprecated("Deprecated in Android API")
+                            override fun onError(utteranceId: String?) {
+                                if (utteranceId == null || utteranceId == finalUtteranceId) {
+                                    finishSpeakingCallback()
+                                }
                             }
-                        }
-                    })
-                    ttsReady = true
-                    _ttsStatus.value = TtsStatus.Ready(buildReadyStatusLabel(engine))
 
-                    // Flush any speech queued while TTS was booting
-                    val queued = pendingSpeech
-                    pendingSpeech = null
-                    if (queued != null) {
-                        speakInternal(queued.text, queued.localeTag, queued.onComplete)
+                            override fun onError(utteranceId: String?, errorCode: Int) {
+                                Log.w(TAG, "TTS utterance error code=$errorCode")
+                                if (utteranceId == null || utteranceId == finalUtteranceId) {
+                                    finishSpeakingCallback()
+                                }
+                            }
+                        })
+                        ttsReady = true
+                        _ttsStatus.value = TtsStatus.Ready(buildReadyStatusLabel(engine))
+
+                        // Flush any speech queued while TTS was booting
+                        val queued = pendingSpeech
+                        pendingSpeech = null
+                        if (queued != null) {
+                            speakInternal(queued.text, queued.localeTag, queued.onComplete)
+                        }
+                    } else {
+                        ttsReady = false
+                        _availableVoices.value = emptyList()
+                        systemVoiceMap = emptyMap()
+                        _ttsStatus.value = TtsStatus.Error("Motor TTS do sistema indisponível (código $status)")
+                        Log.w(TAG, "TextToSpeech init failed with status=$status")
+                        val queued = pendingSpeech
+                        pendingSpeech = null
+                        _isSpeaking.value = false
+                        queued?.onComplete?.invoke()
                     }
-                } else {
-                    ttsReady = false
-                    _availableVoices.value = emptyList()
-                    systemVoiceMap = emptyMap()
-                    _ttsStatus.value = TtsStatus.Error("Motor TTS do sistema indisponível (código $status)")
-                    Log.w(TAG, "TextToSpeech init failed with status=$status")
-                    val queued = pendingSpeech
-                    pendingSpeech = null
-                    queued?.onComplete?.invoke()
                 }
             }
-        }
         }.onFailure { err ->
             ttsReady = false
+            _isSpeaking.value = false
             _ttsStatus.value = TtsStatus.Error("Motor TTS indisponível: ${err.localizedMessage ?: err.javaClass.simpleName}")
             Log.w(TAG, "Failed to construct TextToSpeech", err)
         }.getOrNull()
@@ -296,7 +322,7 @@ class NativeSpeechController(private val context: Context) {
             .substringAfterLast("#", voice.name)
             .substringAfterLast("-", voice.name)
             .replace("_", " ")
-            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("pt", "BR")) else it.toString() }
         return if (shortCode.isNotBlank() && shortCode.length <= 24) {
             "$localeDisplay · $shortCode"
         } else {
@@ -338,8 +364,10 @@ class NativeSpeechController(private val context: Context) {
         pitch: Float,
         preferredTag: String
     ) {
+        // Use USAGE_MEDIA + CONTENT_TYPE_SPEECH so TTS reliably outputs on the user-controlled
+        // media stream on Samsung One UI / Android 14-16 instead of a muted assistant stream.
         val audioAttrs = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
         runCatching { engine.setAudioAttributes(audioAttrs) }
@@ -382,8 +410,53 @@ class NativeSpeechController(private val context: Context) {
         _activeVoiceName.value = runCatching { engine.voice?.name.orEmpty() }.getOrDefault("")
     }
 
+    private fun requestTtsAudioFocus() {
+        val am = audioManager ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(attrs)
+                    .setWillPauseWhenDucked(false)
+                    .build()
+                audioFocusRequest = req
+                am.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                )
+            }
+        }
+    }
+
+    private fun abandonTtsAudioFocus() {
+        val am = audioManager ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+                audioFocusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
+        }
+    }
+
+    private fun clearTtsWatchdog() {
+        ttsWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }
+        ttsWatchdogRunnable = null
+    }
+
     private fun finishSpeakingCallback() {
         mainHandler.post {
+            clearTtsWatchdog()
+            abandonTtsAudioFocus()
             _isSpeaking.value = false
             finalUtteranceId = null
             val cb = onTtsComplete
@@ -402,8 +475,37 @@ class NativeSpeechController(private val context: Context) {
         onConfidence: (Float) -> Unit = {},
         onError: (Int, String) -> Unit = { _, _ -> }
     ) {
+        val sessionId = listeningSessionCounter.incrementAndGet()
+        startListeningInternal(
+            sessionId = sessionId,
+            preferOffline = preferOffline,
+            allowOnlineFallback = preferOffline,
+            localeTag = localeTag,
+            onReady = onReady,
+            onPartial = onPartial,
+            onFinal = onFinal,
+            onRms = onRms,
+            onConfidence = onConfidence,
+            onError = onError
+        )
+    }
+
+    private fun startListeningInternal(
+        sessionId: Long,
+        preferOffline: Boolean,
+        allowOnlineFallback: Boolean,
+        localeTag: String,
+        onReady: () -> Unit,
+        onPartial: (String) -> Unit,
+        onFinal: (String) -> Unit,
+        onRms: (Float) -> Unit,
+        onConfidence: (Float) -> Unit,
+        onError: (Int, String) -> Unit
+    ) {
         mainHandler.post {
-            if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
+            if (sessionId != listeningSessionCounter.get()) return@post
+
+            if (!isSpeechRecognitionAvailable) {
                 onError(
                     SpeechRecognizer.ERROR_SERVER,
                     "Reconhecimento de voz nativo indisponível neste dispositivo."
@@ -416,17 +518,34 @@ class NativeSpeechController(private val context: Context) {
             resetWaveform()
             _lastConfidence.value = -1f
 
-            val recognizer = SpeechRecognizer.createSpeechRecognizer(appContext)
+            val recognizer = runCatching {
+                SpeechRecognizer.createSpeechRecognizer(appContext)
+            }.getOrElse { err ->
+                Log.e(TAG, "Failed to create SpeechRecognizer", err)
+                onError(
+                    SpeechRecognizer.ERROR_CLIENT,
+                    err.localizedMessage ?: "Não foi possível criar o reconhecedor de voz."
+                )
+                return@post
+            }
             speechRecognizer = recognizer
 
+            var lastPartialTranscript = ""
+            var delivered = false
+
             recognizer.setRecognitionListener(object : RecognitionListener {
+                private fun isCurrentSession(): Boolean =
+                    !delivered && sessionId == listeningSessionCounter.get()
+
                 override fun onReadyForSpeech(params: Bundle?) {
+                    if (!isCurrentSession()) return
                     onReady()
                 }
 
                 override fun onBeginningOfSpeech() = Unit
 
                 override fun onRmsChanged(rmsdB: Float) {
+                    if (!isCurrentSession()) return
                     pushRmsToWaveform(rmsdB)
                     onRms(rmsdB)
                 }
@@ -434,24 +553,66 @@ class NativeSpeechController(private val context: Context) {
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
 
                 override fun onEndOfSpeech() {
+                    if (!isCurrentSession()) return
                     resetWaveform()
                     onRms(0f)
                 }
 
                 override fun onError(error: Int) {
+                    if (!isCurrentSession()) return
                     resetWaveform()
                     onRms(0f)
+
+                    // If Samsung/Android STT already delivered valid partial speech before timing out
+                    // or reporting NO_MATCH, recover that transcript instead of silently dropping it!
+                    if (lastPartialTranscript.isNotBlank() &&
+                        (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                    ) {
+                        delivered = true
+                        Log.i(TAG, "Recovered partial transcript on STT error $error: \"$lastPartialTranscript\"")
+                        onConfidence(-1f)
+                        onFinal(lastPartialTranscript)
+                        return
+                    }
+
+                    // If offline STT failed because offline language pack is missing, retry once online
+                    if (allowOnlineFallback &&
+                        (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                            error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
+                            error == SpeechRecognizer.ERROR_NETWORK)
+                    ) {
+                        Log.w(TAG, "Offline STT unavailable (code=$error); retrying with online STT")
+                        startListeningInternal(
+                            sessionId = sessionId,
+                            preferOffline = false,
+                            allowOnlineFallback = false,
+                            localeTag = localeTag,
+                            onReady = onReady,
+                            onPartial = onPartial,
+                            onFinal = onFinal,
+                            onRms = onRms,
+                            onConfidence = onConfidence,
+                            onError = onError
+                        )
+                        return
+                    }
+
+                    delivered = true
                     onError(error, mapSpeechError(error))
                 }
 
                 override fun onResults(results: Bundle?) {
+                    if (!isCurrentSession()) return
+                    delivered = true
                     resetWaveform()
                     onRms(0f)
                     val transcript = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
+                        ?.firstOrNull { !it.isNullOrBlank() }
                         ?.trim()
                         .orEmpty()
+                        .ifBlank { lastPartialTranscript }
                     val confidence = results
                         ?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
                         ?.firstOrNull()
@@ -467,12 +628,14 @@ class NativeSpeechController(private val context: Context) {
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
+                    if (!isCurrentSession()) return
                     val partial = partialResults
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
+                        ?.firstOrNull { !it.isNullOrBlank() }
                         ?.trim()
                         .orEmpty()
                     if (partial.isNotBlank()) {
+                        lastPartialTranscript = partial
                         onPartial(partial)
                     }
                 }
@@ -487,30 +650,35 @@ class NativeSpeechController(private val context: Context) {
                 )
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, localeTag)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, localeTag)
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, appContext.packageName)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1200L)
             }
 
             try {
                 recognizer.startListening(intent)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start SpeechRecognizer", e)
-                onError(
-                    SpeechRecognizer.ERROR_CLIENT,
-                    e.localizedMessage ?: "Erro ao iniciar o microfone nativo."
-                )
+                if (sessionId == listeningSessionCounter.get() && !delivered) {
+                    delivered = true
+                    onError(
+                        SpeechRecognizer.ERROR_CLIENT,
+                        e.localizedMessage ?: "Erro ao iniciar o microfone nativo."
+                    )
+                }
             }
         }
     }
 
     fun stopListening() {
+        listeningSessionCounter.incrementAndGet()
         mainHandler.post {
             resetWaveform()
-            runCatching { speechRecognizer?.stopListening() }
-            runCatching { speechRecognizer?.cancel() }
+            destroyRecognizerInternal()
         }
     }
 
@@ -525,14 +693,16 @@ class NativeSpeechController(private val context: Context) {
             return
         }
 
+        // Synchronously flag speaking before posting to mainHandler so wake-word resume logic
+        // never races ahead and re-opens the microphone while TTS is queued.
+        _isSpeaking.value = true
+
         mainHandler.post {
             if (!ttsReady) {
-                if (_ttsStatus.value is TtsStatus.Error) {
-                    // Attempt one automatic re-init and queue the speech
+                if (_ttsStatus.value is TtsStatus.Error || tts == null) {
                     pendingSpeech = PendingSpeech(cleanText, localeTag, onComplete)
                     reinitializeTts()
                 } else {
-                    // Still initializing — queue so first response is never silently dropped
                     pendingSpeech = PendingSpeech(cleanText, localeTag, onComplete)
                 }
                 return@post
@@ -554,8 +724,9 @@ class NativeSpeechController(private val context: Context) {
             return
         }
 
-        // Pause recognizer if active so microphone does not capture TTS output
-        runCatching { speechRecognizer?.cancel() }
+        // Invalidate and destroy any active recognizer so microphone never captures TTS audio
+        listeningSessionCounter.incrementAndGet()
+        destroyRecognizerInternal()
 
         if (!skipConfigure) {
             configureTtsAudioAndLocale(engine, localeTag)
@@ -567,6 +738,8 @@ class NativeSpeechController(private val context: Context) {
             return
         }
 
+        requestTtsAudioFocus()
+
         val lastId = "jarvis_tts_${UUID.randomUUID()}"
         finalUtteranceId = lastId
         onTtsComplete = onComplete
@@ -574,6 +747,7 @@ class NativeSpeechController(private val context: Context) {
 
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
         }
 
         var enqueuedAny = false
@@ -592,7 +766,21 @@ class NativeSpeechController(private val context: Context) {
 
         if (!enqueuedAny) {
             finishSpeakingCallback()
+            return
         }
+
+        // Watchdog ensures TTS completion callback ALWAYS fires even if an OEM engine misses onDone
+        clearTtsWatchdog()
+        val rateDivisor = ttsConfig.speechRate.coerceIn(0.5f, 2.0f)
+        val timeoutMs = ((cleanText.length * 115f / rateDivisor).toLong()).coerceIn(7_000L, 45_000L)
+        val watchdog = Runnable {
+            if (finalUtteranceId == lastId) {
+                Log.w(TAG, "TTS watchdog triggered after ${timeoutMs}ms; releasing speaking state")
+                finishSpeakingCallback()
+            }
+        }
+        ttsWatchdogRunnable = watchdog
+        mainHandler.postDelayed(watchdog, timeoutMs)
     }
 
     fun stopSpeaking() {
@@ -600,6 +788,7 @@ class NativeSpeechController(private val context: Context) {
     }
 
     fun destroy() {
+        listeningSessionCounter.incrementAndGet()
         mainHandler.post {
             destroyRecognizerInternal()
             stopSpeakingInternal()
@@ -610,6 +799,8 @@ class NativeSpeechController(private val context: Context) {
     }
 
     private fun stopSpeakingInternal() {
+        clearTtsWatchdog()
+        abandonTtsAudioFocus()
         pendingSpeech = null
         finalUtteranceId = null
         onTtsComplete = null

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
@@ -223,13 +224,19 @@ fun OpenJarvisTheme(
         }
     }
 
-    CompositionLocalProvider(LocalAppThemeMode provides themeMode) {
+    CompositionLocalProvider(
+        LocalAppThemeMode provides themeMode,
+        LocalContentColor provides colorScheme.onBackground
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = OpenJarvisTypography,
-            shapes = shapes,
-            content = content
-        )
+            shapes = shapes
+        ) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+                content()
+            }
+        }
     }
 }
 
@@ -371,6 +378,8 @@ fun JarvisThemeBackdrop(
                 }
             }
         }
-        content()
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+            content()
+        }
     }
 }

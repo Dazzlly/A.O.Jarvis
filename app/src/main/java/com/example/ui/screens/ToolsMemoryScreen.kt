@@ -108,7 +108,8 @@ fun ToolsMemoryScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Comandos & Memória",
-                    style = MaterialTheme.typography.headlineMedium
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     text = "Ferramentas locais, webhooks LAN e contexto persistente do A.O.Jarvis.",

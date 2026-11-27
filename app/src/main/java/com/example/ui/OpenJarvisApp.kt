@@ -78,6 +78,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.cloud.FirebaseRuntimeConfig
 import com.example.cloud.onGoogleSignInClicked
 import com.example.cloud.signOutWithCredentialClear
 import com.example.core.AppDestination
@@ -249,6 +250,48 @@ fun OpenJarvisApp(
             currentTab = JarvisTab.CONSOLE
             selectedConsoleMode = 0
             viewModel.analyzePickedImageUri(uri)
+        }
+    }
+
+    val firebaseConfigRevision by FirebaseRuntimeConfig.configRevision.collectAsStateWithLifecycle()
+    val isFirebaseAvailable = remember(context, firebaseConfigRevision) {
+        FirebaseRuntimeConfig.isFirebaseAvailable(context)
+    }
+
+    val googleServicesPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("Não foi possível ler o arquivo selecionado.")
+            }.fold(
+                onSuccess = { jsonText ->
+                    FirebaseRuntimeConfig.importGoogleServicesJson(context, jsonText).fold(
+                        onSuccess = { projectId ->
+                            Toast.makeText(
+                                context,
+                                "Firebase ativado ($projectId)! Agora você pode entrar com Google.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        onFailure = { err ->
+                            Toast.makeText(
+                                context,
+                                "Arquivo inválido: ${err.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    )
+                },
+                onFailure = { err ->
+                    Toast.makeText(
+                        context,
+                        "Erro ao abrir google-services.json: ${err.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            )
         }
     }
 
@@ -550,6 +593,7 @@ fun OpenJarvisApp(
 
                 Scaffold(
                     containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
                     contentWindowInsets = WindowInsets.safeDrawing,
                     bottomBar = {
                         if (!useRail && !showTtsSettingsScreen) {
@@ -886,6 +930,7 @@ fun OpenJarvisApp(
                                     onToggleDeviceDnd = { viewModel.toggleDeviceDnd(it) },
                                     onOpenDevicePanel = { viewModel.openDeviceSystemPanel(it) },
                                     cloudSyncSummary = cloudSyncSummary,
+                                    isFirebaseAvailable = isFirebaseAvailable,
                                     onSyncCloudNow = { viewModel.syncAllToCloud() },
                                     onSignInGoogle = {
                                         onGoogleSignInClicked(
@@ -911,6 +956,17 @@ fun OpenJarvisApp(
                                                 Toast.makeText(context, "Sessão Google encerrada.", Toast.LENGTH_SHORT).show()
                                             }
                                         )
+                                    },
+                                    onImportGoogleServicesJson = {
+                                        runCatching {
+                                            googleServicesPickerLauncher.launch(arrayOf("application/json", "*/*"))
+                                        }.onFailure { err ->
+                                            Toast.makeText(
+                                                context,
+                                                "Não foi possível abrir o seletor de arquivos: ${err.message}",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     },
                                     defaultAssistantStatus = defaultAssistantStatus,
                                     onRefreshDefaultAssistant = { viewModel.refreshDefaultAssistantStatus() },
