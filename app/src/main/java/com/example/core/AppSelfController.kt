@@ -57,6 +57,7 @@ sealed interface AppUiCommand {
     data class SetThemeMode(val mode: AppThemeMode) : AppUiCommand
     data class SetRoutingMode(val mode: RoutingMode) : AppUiCommand
     data class ToggleBackgroundService(val shouldRun: Boolean) : AppUiCommand
+    data class ToggleDeviceControlService(val shouldRun: Boolean) : AppUiCommand
     data object RequestAllPermissions : AppUiCommand
     data object CreateNewSession : AppUiCommand
     data object ProbeOllama : AppUiCommand
@@ -157,7 +158,8 @@ class AppSelfController(private val appContext: Context) {
     fun buildSelfAwarenessPrompt(
         settings: JarvisSettings,
         isBackgroundRunning: Boolean,
-        isScreenSharing: Boolean = false
+        isScreenSharing: Boolean = false,
+        lastVisualSummary: String = ""
     ): String {
         val currentTab = _currentDestination.value
         val permsSummary = PermissionsManager.summarizePermissionsForPrompt(appContext)
@@ -171,18 +173,24 @@ class AppSelfController(private val appContext: Context) {
             append("TTS automático=${if (settings.autoSpeakResponses) "ativado" else "desativado"}, ")
             append("tema=${settings.themeMode.label}, ")
             append("serviço background=${if (isBackgroundRunning) "ativo" else "inativo"}, ")
-            append("compartilhamento de tela=${if (isScreenSharing) "ATIVO (você recebe quadros da tela do usuário)" else "inativo"}, ")
+            append("compartilhamento de tela=${if (isScreenSharing) "ATIVO (você recebe capturas da tela do usuário no motor atual)" else "inativo"}, ")
             append("servidor LAN=${if (settings.lanTriggerEnabled) "habilitado na porta ${settings.lanTriggerPort}" else "desativado"}.\n")
+            if (lastVisualSummary.isNotBlank()) {
+                append("Último contexto visual interpretado da tela: \"$lastVisualSummary\".\n")
+            }
             append("$permsSummary.\n")
-            append("Quando o usuário pedir para navegar no app, alterar configurações do celular (brilho, volume, lanterna, rotação, não perturbe, tempo de tela, painéis Wi-Fi/Bluetooth), compartilhar tela, evoluir o próprio código no GitHub ou abrir apps externos, responda em português e adicione ao final a tag correspondente (o sistema executa e oculta a tag):\n")
+            append("Quando o usuário pedir para navegar no app, alterar configurações do celular (brilho, volume, Wi-Fi, Bluetooth, lanterna, rotação, não perturbe, tempo de tela), compartilhar tela, evoluir o próprio código no GitHub ou abrir apps externos, responda em português e adicione ao final a tag correspondente (o sistema executa e oculta a tag):\n")
             append("- [[ACTION:NAVIGATE:CONSOLE|ENGINES|TOOLS|TELEMETRY]] (navega para uma aba do app)\n")
             append("- [[ACTION:OPEN_MODE:GEMINI_LIVE|NATIVE]] (alterna entre Voz Nativa e Gemini Live)\n")
             append("- [[ACTION:SET_THEME:TRON|OBSIDIAN|LIGHT|CUSTOM]] (troca o tema do app entre Tron Legacy, Obsidian Pro, Claro ou Custom)\n")
             append("- [[ACTION:SET_ROUTING:AUTO|GEMINI|OLLAMA|OFFLINE]] (troca o motor de IA)\n")
             append("- [[ACTION:TOGGLE_BG:START|STOP]] (liga/desliga o serviço em segundo plano)\n")
+            append("- [[ACTION:DEVICE_CONTROL_SERVICE:START|STOP]] (liga/desliga o Foreground Service de controle de dispositivo)\n")
             append("- [[ACTION:SCREEN_SHARE:START|STOP]] (inicia ou encerra o compartilhamento de tela para visão em tempo real)\n")
             append("- [[ACTION:DEVICE_SETTING:brightness=80|up|down|auto|manual]] (ajusta o brilho da tela)\n")
             append("- [[ACTION:DEVICE_SETTING:volume=70|up|down|mute|max]] (ajusta o volume de mídia)\n")
+            append("- [[ACTION:DEVICE_SETTING:wifi=on|off|toggle]] (liga/desliga ou abre painel rápido do Wi-Fi)\n")
+            append("- [[ACTION:DEVICE_SETTING:bluetooth=on|off|toggle]] (liga/desliga ou solicita ativação do Bluetooth)\n")
             append("- [[ACTION:DEVICE_SETTING:torch=on|off]] (liga/desliga a lanterna)\n")
             append("- [[ACTION:DEVICE_SETTING:rotate=on|off]] (ativa/trava rotação automática)\n")
             append("- [[ACTION:DEVICE_SETTING:dnd=on|off]] (ativa/desativa Não Perturbe)\n")
@@ -267,6 +275,12 @@ class AppSelfController(private val appContext: Context) {
                 "TOGGLE_BG" -> {
                     val start = !arg.equals("STOP", ignoreCase = true)
                     emitCommand(AppUiCommand.ToggleBackgroundService(start))
+                }
+
+                "DEVICE_CONTROL_SERVICE" -> {
+                    val start = !arg.equals("STOP", ignoreCase = true) && !arg.equals("OFF", ignoreCase = true)
+                    emitCommand(AppUiCommand.ToggleDeviceControlService(start))
+                    executedNotes.add(if (start) "Serviço de controle do dispositivo iniciado" else "Serviço de controle do dispositivo parado")
                 }
 
                 "SCREEN_SHARE" -> {

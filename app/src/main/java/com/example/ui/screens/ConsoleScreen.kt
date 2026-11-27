@@ -522,12 +522,13 @@ private fun ScreenVisionControlStrip(
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = if (screenShareState.isSharing) {
-                        "Tela ao vivo · Jarvis vendo"
-                    } else if (screenShareState.hasFrame) {
-                        "Captura pronta para análise"
-                    } else {
-                        "Visão de Tela"
+                    text = when {
+                        screenShareState.isAnalyzing -> "Interpretando tela com IA…"
+                        screenShareState.isSharing && screenShareState.hasFrame ->
+                            "Tela ao vivo (${screenShareState.captureCount} quadros)"
+                        screenShareState.isSharing -> "Tela ao vivo · Aguardando quadro"
+                        screenShareState.hasFrame -> "Captura pronta para análise"
+                        else -> "Visão de Tela"
                     },
                     style = MaterialTheme.typography.labelLarge,
                     maxLines = 1,
@@ -538,12 +539,16 @@ private fun ScreenVisionControlStrip(
                 if (screenShareState.hasFrame) {
                     FilledTonalButton(
                         onClick = onAnalyzeScreenNow,
+                        enabled = !screenShareState.isAnalyzing,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                         modifier = Modifier
                             .height(34.dp)
                             .testTag("analyze_screen_now_button")
                     ) {
-                        Text("Analisar", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = if (screenShareState.isAnalyzing) "Lendo…" else "Analisar",
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
 
@@ -586,6 +591,22 @@ private fun ScreenVisionControlStrip(
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
+            }
+
+            if (screenShareState.lastVisualSummary.isNotBlank()) {
+                val enginePrefix = if (screenShareState.lastAnalyzedEngine.isNotBlank()) {
+                    "Contexto (${screenShareState.lastAnalyzedEngine}): "
+                } else {
+                    "Contexto: "
+                }
+                Text(
+                    text = "$enginePrefix${screenShareState.lastVisualSummary}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
 
             if (screenShareState.errorMessage != null) {

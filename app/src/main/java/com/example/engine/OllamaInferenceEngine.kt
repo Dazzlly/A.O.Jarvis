@@ -1,5 +1,7 @@
 package com.example.engine
 
+import android.graphics.Bitmap
+import android.util.Base64
 import android.util.Log
 import com.example.data.JarvisSettings
 import com.example.data.MemoryEntity
@@ -16,6 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
@@ -111,7 +114,8 @@ class OllamaInferenceEngine {
         history: List<ConversationTurn>,
         memories: List<MemoryEntity>,
         settings: JarvisSettings,
-        selfAwarenessContext: String = ""
+        selfAwarenessContext: String = "",
+        attachedBitmap: Bitmap? = null
     ): Flow<InferenceStreamEvent> = flow {
         val baseUrl = normalizeBaseUrl(settings.ollamaBaseUrl)
         val modelName = settings.ollamaModel.ifBlank { "llama3.2" }
@@ -123,6 +127,12 @@ class OllamaInferenceEngine {
                 "\n\nMemórias salvas localmente:\n" +
                     memories.take(12).joinToString("\n") { "- [${it.category}] ${it.key}: ${it.content}" }
             } else ""
+
+            val encodedImageBase64 = if (attachedBitmap != null && !attachedBitmap.isRecycled) {
+                encodeBitmapToBase64Jpeg(attachedBitmap)
+            } else {
+                null
+            }
 
             val messages = JSONArray().apply {
                 put(
@@ -143,6 +153,9 @@ class OllamaInferenceEngine {
                     JSONObject().apply {
                         put("role", "user")
                         put("content", prompt)
+                        if (!encodedImageBase64.isNullOrBlank()) {
+                            put("images", JSONArray().put(encodedImageBase64))
+                        }
                     }
                 )
             }
@@ -280,5 +293,13 @@ class OllamaInferenceEngine {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun encodeBitmapToBase64Jpeg(bitmap: Bitmap): String? {
+        return runCatching {
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 82, stream)
+            Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+        }.getOrNull()
     }
 }

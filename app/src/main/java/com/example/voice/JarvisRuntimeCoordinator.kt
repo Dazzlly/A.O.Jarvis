@@ -6,7 +6,10 @@ import androidx.core.content.ContextCompat
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
 import com.example.core.AppUpdateManager
+import com.example.core.DeviceControlForegroundService
+import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsController
+import com.example.core.DeviceSettingsSnapshot
 import com.example.core.SecureTokenStore
 import com.example.core.SelfEvolutionManager
 import com.example.data.JarvisDatabase
@@ -53,6 +56,14 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
     val appUpdateManager: AppUpdateManager = AppUpdateManager(appContext)
     val secureTokenStore: SecureTokenStore = SecureTokenStore(appContext)
     val deviceSettingsController: DeviceSettingsController = DeviceSettingsController(appContext)
+    private val _deviceControlServiceState = MutableStateFlow(
+        DeviceControlServiceState(
+            isRunning = false,
+            snapshot = deviceSettingsController.readSnapshot(),
+            lastUpdatedAt = System.currentTimeMillis()
+        )
+    )
+    val deviceControlServiceState: StateFlow<DeviceControlServiceState> = _deviceControlServiceState.asStateFlow()
     val screenVisionManager: ScreenVisionManager = ScreenVisionManager()
     val selfEvolutionManager: SelfEvolutionManager = SelfEvolutionManager(
         tokenStore = secureTokenStore,
@@ -122,6 +133,43 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
             action = if (paused) JarvisBackgroundService.ACTION_RESUME else JarvisBackgroundService.ACTION_PAUSE
         }
         context.startService(intent)
+    }
+
+    fun startDeviceControlService(context: Context) {
+        val intent = Intent(context, DeviceControlForegroundService::class.java).apply {
+            action = DeviceControlForegroundService.ACTION_START
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    fun stopDeviceControlService(context: Context) {
+        val intent = Intent(context, DeviceControlForegroundService::class.java).apply {
+            action = DeviceControlForegroundService.ACTION_STOP
+        }
+        context.startService(intent)
+    }
+
+    fun executeDeviceSettingViaService(context: Context, settingSpec: String) {
+        val intent = Intent(context, DeviceControlForegroundService::class.java).apply {
+            action = DeviceControlForegroundService.ACTION_EXECUTE_SETTING
+            putExtra(DeviceControlForegroundService.EXTRA_SETTING_SPEC, settingSpec)
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    fun updateDeviceControlServiceState(
+        isRunning: Boolean? = null,
+        snapshot: DeviceSettingsSnapshot? = null,
+        lastActionMessage: String? = null
+    ) {
+        _deviceControlServiceState.update { current ->
+            current.copy(
+                isRunning = isRunning ?: current.isRunning,
+                snapshot = snapshot ?: deviceSettingsController.readSnapshot(),
+                lastActionMessage = lastActionMessage ?: current.lastActionMessage,
+                lastUpdatedAt = System.currentTimeMillis()
+            )
+        }
     }
 
     companion object {

@@ -7,11 +7,21 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.speech.SpeechRecognizer
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.assistant.DefaultAssistantManager
+import com.example.assistant.DefaultAssistantStatus
+import com.example.cloud.CloudMemory
+import com.example.cloud.CloudSession
+import com.example.cloud.CloudSyncSummary
+import com.example.cloud.CloudUiState
+import com.example.cloud.CloudVoiceCommand
+import com.example.cloud.JarvisCloudRepository
 import com.example.core.AppDestination
 import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
+import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.EvolutionProposal
 import com.example.core.FdroidRepoCheckState
@@ -19,7 +29,12 @@ import com.example.core.GuidedTourState
 import com.example.core.IntegrationResult
 import com.example.core.SelfEvolutionState
 import com.example.vision.ScreenShareState
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 import com.example.data.AppThemeMode
 import com.example.data.ChatMessageEntity
@@ -64,7 +79,11 @@ sealed interface StreamingUiState {
     data class Error(val message: String) : StreamingUiState
 }
 
-class OpenJarvisViewModel(application: Application) : AndroidViewModel(application) {
+class OpenJarvisViewModel(
+    application: Application,
+    private val currentUserId: String,
+    private val cloudRepository: JarvisCloudRepository
+) : AndroidViewModel(application) {
 
     private val coordinator = JarvisRuntimeCoordinator.getInstance(application.applicationContext)
     private val database = coordinator.database
@@ -78,10 +97,110 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     private val deviceSettingsController = coordinator.deviceSettingsController
     private val screenVisionManager = coordinator.screenVisionManager
     private val selfEvolutionManager = coordinator.selfEvolutionManager
+    private val defaultAssistantManager = DefaultAssistantManager(application.applicationContext)
+
+    private val _defaultAssistantStatus = MutableStateFlow(defaultAssistantManager.readStatus())
+    val defaultAssistantStatus: StateFlow<DefaultAssistantStatus> = _defaultAssistantStatus.asStateFlow()
+
+    private val _isCloudSyncing = MutableStateFlow(false)
+    private val _cloudStatusMessage = MutableStateFlow("Sincronização Firestore ativa em tempo real")
+
+    // Two-tier Flow error unwrapping: CancellationException -> FirebaseFirestoreException -> CloudUiState.Error
+    val cloudMemoriesState: StateFlow<CloudUiState<List<CloudMemory>>> = cloudRepository
+        .observeMemories(currentUserId)
+        .map<List<CloudMemory>, CloudUiState<List<CloudMemory>>> { CloudUiState.Success(it) }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            val rootError = firestoreError ?: error
+            Log.w("OpenJarvisVM", "Error observing cloud memories", rootError)
+            emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar memórias na nuvem."))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000L),
+            initialValue = CloudUiState.Loading
+        )
+
+    val cloudCommandsState: StateFlow<CloudUiState<List<CloudVoiceCommand>>> = cloudRepository
+        .observeVoiceCommands(currentUserId)
+        .map<List<CloudVoiceCommand>, CloudUiState<List<CloudVoiceCommand>>> { CloudUiState.Success(it) }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            val rootError = firestoreError ?: error
+            Log.w("OpenJarvisVM", "Error observing cloud voice commands", rootError)
+            emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar comandos na nuvem."))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000L),
+            initialValue = CloudUiState.Loading
+        )
+
+    val cloudSessionsState: StateFlow<CloudUiState<List<CloudSession>>> = cloudRepository
+        .observeSessions(currentUserId)
+        .map<List<CloudSession>, CloudUiState<List<CloudSession>>> { CloudUiState.Success(it) }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            val rootError = firestoreError ?: error
+            Log.w("OpenJarvisVM", "Error observing cloud sessions", rootError)
+            emit(CloudUiState.Error(rootError.message ?: "Falha ao sincronizar sessões na nuvem."))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000L),
+            initialValue = CloudUiState.Loading
+        )
+
+    val cloudSyncSummary: StateFlow<CloudSyncSummary> = combine(
+        cloudMemoriesState,
+        cloudCommandsState,
+        cloudSessionsState,
+        _isCloudSyncing,
+        _cloudStatusMessage
+    ) { memState, cmdState, sessState, syncing, statusMsg ->
+        val user = Firebase.auth.currentUser
+        val memCount = (memState as? CloudUiState.Success)?.data?.size ?: 0
+        val cmdCount = (cmdState as? CloudUiState.Success)?.data?.size ?: 0
+        val sessCount = (sessState as? CloudUiState.Success)?.data?.size ?: 0
+        val firstError = (memState as? CloudUiState.Error)?.message
+            ?: (cmdState as? CloudUiState.Error)?.message
+            ?: (sessState as? CloudUiState.Error)?.message
+        CloudSyncSummary(
+            userId = currentUserId,
+            displayName = user?.displayName.orEmpty().ifBlank { "Usuário A.O.Jarvis" },
+            email = user?.email.orEmpty(),
+            memoriesCount = memCount,
+            commandsCount = cmdCount,
+            sessionsCount = sessCount,
+            isSyncing = syncing,
+            lastSyncMessage = statusMsg,
+            errorMessage = firstError
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = CloudSyncSummary(
+            userId = currentUserId,
+            displayName = Firebase.auth.currentUser?.displayName.orEmpty(),
+            email = Firebase.auth.currentUser?.email.orEmpty()
+        )
+    )
 
     init {
         viewModelScope.launch {
             conversationStateManager.ensureDefaultSessionExists()
+            Firebase.auth.currentUser?.let { user ->
+                cloudRepository.upsertUserProfile(user)
+            }
         }
     }
 
@@ -137,11 +256,17 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     val currentVersionLabel: String =
         "v${appUpdateManager.currentVersionName} (build ${appUpdateManager.currentVersionCode})"
     val screenShareState: StateFlow<ScreenShareState> = screenVisionManager.state
+    val deviceControlServiceState: StateFlow<DeviceControlServiceState> = coordinator.deviceControlServiceState
     val selfEvolutionState: StateFlow<SelfEvolutionState> = selfEvolutionManager.state
     val hasGitHubToken: StateFlow<Boolean> = selfEvolutionManager.hasToken
 
-    private val _deviceSettingsSnapshot = MutableStateFlow(deviceSettingsController.readSnapshot())
-    val deviceSettingsSnapshot: StateFlow<DeviceSettingsSnapshot> = _deviceSettingsSnapshot.asStateFlow()
+    val deviceSettingsSnapshot: StateFlow<DeviceSettingsSnapshot> = deviceControlServiceState
+        .map { it.snapshot }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = deviceSettingsController.readSnapshot()
+        )
 
     val ollamaHealth: StateFlow<OllamaHealthStatus?> = networkState
         .map { it.ollamaHealth }
@@ -171,6 +296,7 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
             CommandSource.VOICE_STT.tag -> CommandSource.VOICE_STT
             CommandSource.VOICE_BG.tag -> CommandSource.VOICE_BG
             CommandSource.LAN_TRIGGER.tag -> CommandSource.LAN_TRIGGER
+            CommandSource.SCREEN_VISION.tag -> CommandSource.SCREEN_VISION
             CommandSource.TOOL_TEST.tag -> CommandSource.TOOL_TEST
             else -> CommandSource.TEXT
         }
@@ -425,9 +551,10 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
         networkEngineManager.refreshNetworkState()
     }
 
-    // Session & History management
+    // Session & History management (Local Room + Firestore Cloud Sync)
     fun createNewSession() = viewModelScope.launch {
-        conversationStateManager.createNewSession()
+        val newId = conversationStateManager.createNewSession()
+        cloudRepository.upsertSession(sessionId = newId, title = "Nova Conversa", messageCount = 0L)
     }
 
     fun switchSession(sessionId: String) = viewModelScope.launch {
@@ -439,6 +566,7 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
             conversationStateManager.clearActiveSession()
         } else {
             conversationStateManager.deleteSession(sessionId)
+            cloudRepository.deleteSession(sessionId)
         }
     }
 
@@ -463,36 +591,135 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     fun clearTraces() = viewModelScope.launch { database.traceDao().clearAll() }
 
     fun addVoiceCommand(trigger: String, actionType: String, payload: String) = viewModelScope.launch {
-        database.voiceCommandDao().insertCommand(
+        val cleanTrigger = trigger.trim()
+        val cleanPayload = payload.trim()
+        if (cleanTrigger.isEmpty() || cleanPayload.isEmpty()) return@launch
+        val localId = database.voiceCommandDao().insertCommand(
             VoiceCommandEntity(
-                triggerPhrase = trigger.trim(),
+                triggerPhrase = cleanTrigger,
                 actionType = actionType,
-                actionPayload = payload.trim(),
+                actionPayload = cleanPayload,
                 enabled = true
             )
+        )
+        cloudRepository.addVoiceCommand(
+            triggerPhrase = cleanTrigger,
+            actionType = actionType,
+            actionPayload = cleanPayload,
+            enabled = true,
+            docIdOverride = "cmd_$localId"
         )
     }
 
     fun toggleVoiceCommand(command: VoiceCommandEntity) = viewModelScope.launch {
-        database.voiceCommandDao().updateCommand(command.copy(enabled = !command.enabled))
+        val nextEnabled = !command.enabled
+        database.voiceCommandDao().updateCommand(command.copy(enabled = nextEnabled))
+        cloudRepository.addVoiceCommand(
+            triggerPhrase = command.triggerPhrase,
+            actionType = command.actionType,
+            actionPayload = command.actionPayload,
+            enabled = nextEnabled,
+            docIdOverride = "cmd_${command.id}"
+        )
     }
 
     fun deleteVoiceCommand(id: Long) = viewModelScope.launch {
         database.voiceCommandDao().deleteCommand(id)
+        cloudRepository.deleteVoiceCommand("cmd_$id")
     }
 
     fun addMemory(key: String, content: String, category: String) = viewModelScope.launch {
-        database.memoryDao().insertMemory(
+        val cleanKey = key.trim()
+        val cleanContent = content.trim()
+        val cleanCategory = category.trim().ifBlank { "Geral" }
+        if (cleanKey.isEmpty() || cleanContent.isEmpty()) return@launch
+        val localId = database.memoryDao().insertMemory(
             MemoryEntity(
-                key = key.trim(),
-                content = content.trim(),
-                category = category.trim().ifBlank { "Geral" }
+                key = cleanKey,
+                content = cleanContent,
+                category = cleanCategory
             )
+        )
+        cloudRepository.addMemory(
+            key = cleanKey,
+            content = cleanContent,
+            category = cleanCategory,
+            docIdOverride = "mem_$localId"
         )
     }
 
     fun deleteMemory(id: Long) = viewModelScope.launch {
         database.memoryDao().deleteMemory(id)
+        cloudRepository.deleteMemory("mem_$id")
+    }
+
+    fun syncAllToCloud() = viewModelScope.launch {
+        _isCloudSyncing.value = true
+        _cloudStatusMessage.value = "Sincronizando dados com o Firebase Firestore…"
+        var syncedCount = 0
+        var hadError = false
+        try {
+            Firebase.auth.currentUser?.let { user ->
+                if (cloudRepository.upsertUserProfile(user).isFailure) hadError = true
+            }
+            val localMemories = database.memoryDao().getAllMemories()
+            localMemories.forEach { mem ->
+                val res = cloudRepository.addMemory(
+                    key = mem.key,
+                    content = mem.content,
+                    category = mem.category,
+                    docIdOverride = "mem_${mem.id}"
+                )
+                if (res.isSuccess) syncedCount++ else hadError = true
+            }
+            val localCommands = voiceCommands.value
+            localCommands.forEach { cmd ->
+                val res = cloudRepository.addVoiceCommand(
+                    triggerPhrase = cmd.triggerPhrase,
+                    actionType = cmd.actionType,
+                    actionPayload = cmd.actionPayload,
+                    enabled = cmd.enabled,
+                    docIdOverride = "cmd_${cmd.id}"
+                )
+                if (res.isSuccess) syncedCount++ else hadError = true
+            }
+            val localSessions = sessions.value
+            localSessions.forEach { sess ->
+                val count = database.chatMessageDao().countMessagesInSession(sess.id).toLong()
+                val res = cloudRepository.upsertSession(
+                    sessionId = sess.id,
+                    title = sess.title,
+                    messageCount = count
+                )
+                if (res.isSuccess) syncedCount++ else hadError = true
+            }
+            _cloudStatusMessage.value = if (hadError) {
+                "Sincronização parcial ($syncedCount itens enviados)."
+            } else {
+                "Tudo sincronizado no Firestore ($syncedCount itens)."
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _cloudStatusMessage.value = e.localizedMessage ?: "Falha ao sincronizar com o Firestore."
+        } finally {
+            _isCloudSyncing.value = false
+        }
+    }
+
+    // Default Digital Assistant Configuration
+    fun refreshDefaultAssistantStatus() {
+        _defaultAssistantStatus.value = defaultAssistantManager.readStatus()
+    }
+
+    fun createDefaultAssistantRoleIntent(): Intent? {
+        return defaultAssistantManager.createRequestDefaultAssistantRoleIntent()
+    }
+
+    fun openDefaultAssistantSettings(): IntegrationResult {
+        return defaultAssistantManager.openSystemAssistantSettings().also {
+            refreshDefaultAssistantStatus()
+        }
     }
 
     // Settings updates
@@ -627,7 +854,11 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     fun analyzeCurrentScreenNow(
         question: String = "Identifique e descreva de forma clara o que estou visualizando na tela agora."
     ) {
-        sendPrompt(question, sourceTag = CommandSource.TEXT.tag)
+        if (screenShareState.value.isSharing) {
+            screenVisionManager.requestOnDemandScreenAnalysis(getApplication(), question)
+        } else {
+            sendPrompt(question, sourceTag = CommandSource.SCREEN_VISION.tag)
+        }
     }
 
     fun analyzePickedImageUri(uri: Uri) {
@@ -649,15 +880,31 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
                 screenVisionManager.attachManualScreenshot(bitmap)
                 sendPrompt(
                     prompt = "Identifique e explique o que aparece nesta imagem/captura de tela.",
-                    sourceTag = CommandSource.TEXT.tag
+                    sourceTag = CommandSource.SCREEN_VISION.tag
                 )
             }
         }
     }
 
-    // Device Settings Control
+    // Device Settings Control & Dedicated Foreground Service
     fun refreshDeviceSettings() {
-        _deviceSettingsSnapshot.value = deviceSettingsController.readSnapshot()
+        coordinator.updateDeviceControlServiceState(snapshot = deviceSettingsController.readSnapshot())
+    }
+
+    fun startDeviceControlService() {
+        coordinator.startDeviceControlService(getApplication())
+    }
+
+    fun stopDeviceControlService() {
+        coordinator.stopDeviceControlService(getApplication())
+    }
+
+    fun toggleDeviceControlService() {
+        if (deviceControlServiceState.value.isRunning) {
+            stopDeviceControlService()
+        } else {
+            startDeviceControlService()
+        }
     }
 
     fun openWriteSettingsPermission(): IntegrationResult =
@@ -667,19 +914,60 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
         deviceSettingsController.openDndAccessPermission().also { refreshDeviceSettings() }
 
     fun setDeviceBrightness(percent: Int): IntegrationResult =
-        deviceSettingsController.setBrightnessPercent(percent).also { refreshDeviceSettings() }
+        deviceSettingsController.setBrightnessPercent(percent).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
 
     fun setDeviceVolume(percent: Int): IntegrationResult =
-        deviceSettingsController.setMediaVolumePercent(percent).also { refreshDeviceSettings() }
+        deviceSettingsController.setMediaVolumePercent(percent).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
+
+    fun toggleDeviceWifi(enabled: Boolean): IntegrationResult =
+        deviceSettingsController.toggleWifi(enabled).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
+
+    fun toggleDeviceBluetooth(enabled: Boolean): IntegrationResult =
+        deviceSettingsController.toggleBluetooth(enabled).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
 
     fun toggleDeviceTorch(enabled: Boolean): IntegrationResult =
-        deviceSettingsController.setTorchEnabled(enabled).also { refreshDeviceSettings() }
+        deviceSettingsController.setTorchEnabled(enabled).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
 
     fun toggleDeviceAutoRotate(enabled: Boolean): IntegrationResult =
-        deviceSettingsController.setAutoRotate(enabled).also { refreshDeviceSettings() }
+        deviceSettingsController.setAutoRotate(enabled).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
 
     fun toggleDeviceDnd(enabled: Boolean): IntegrationResult =
-        deviceSettingsController.setDoNotDisturb(enabled).also { refreshDeviceSettings() }
+        deviceSettingsController.setDoNotDisturb(enabled).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                lastActionMessage = it.message
+            )
+        }
 
     fun openDeviceSystemPanel(target: String): IntegrationResult =
         deviceSettingsController.openSystemPanelOrSettings(target)

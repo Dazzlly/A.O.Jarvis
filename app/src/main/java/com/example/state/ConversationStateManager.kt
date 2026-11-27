@@ -26,6 +26,7 @@ enum class CommandSource(val tag: String, val label: String) {
     VOICE_STT("VOICE_STT", "Voz Nativa"),
     VOICE_BG("VOICE_BG", "Voz Contínua"),
     LAN_TRIGGER("LAN_TRIGGER", "Gatilho LAN"),
+    SCREEN_VISION("SCREEN_VISION", "Visão de Tela"),
     TOOL_TEST("TOOL_TEST", "Comando")
 }
 

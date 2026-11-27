@@ -14,17 +14,22 @@ import java.util.concurrent.atomic.AtomicReference
 data class ScreenShareState(
     val isSharing: Boolean = false,
     val hasFrame: Boolean = false,
+    val isAnalyzing: Boolean = false,
     val frameWidth: Int = 0,
     val frameHeight: Int = 0,
+    val captureCount: Int = 0,
     val lastCaptureTimestamp: Long = 0L,
+    val lastVisualSummary: String = "",
+    val lastAnalyzedEngine: String = "",
     val statusText: String = "Compartilhamento de tela inativo",
     val errorMessage: String? = null
 )
 
 /**
- * Gerenciador central de visão de tela em tempo real do OpenJarvis.
- * Mantém o último quadro capturado via MediaProjection (ou captura pontual enviada pelo usuário)
- * pronto para envio multimodal ao Gemini via Firebase AI Logic.
+ * Gerenciador central de visão de tela em tempo real do A.O.Jarvis.
+ * Mantém o último quadro capturado via MediaProjection (ou captura pontual enviada pelo usuário),
+ * envia para o motor de IA ativo (Gemini Cloud ou Ollama local) e preserva o resumo visual
+ * para consciência de contexto contínua.
  */
 class ScreenVisionManager {
 
@@ -54,6 +59,17 @@ class ScreenVisionManager {
         context.startService(serviceIntent)
     }
 
+    fun requestOnDemandScreenAnalysis(
+        context: Context,
+        prompt: String = "Descreva objetivamente o que está sendo exibido na minha tela agora e ofereça ajuda contextual."
+    ) {
+        val serviceIntent = Intent(context, ScreenShareService::class.java).apply {
+            action = ScreenShareService.ACTION_CAPTURE_AND_ANALYZE
+            putExtra(ScreenShareService.EXTRA_ANALYSIS_PROMPT, prompt)
+        }
+        context.startService(serviceIntent)
+    }
+
     fun updateFrame(bitmap: Bitmap) {
         latestBitmapRef.set(bitmap)
         _state.update {
@@ -62,8 +78,13 @@ class ScreenVisionManager {
                 hasFrame = true,
                 frameWidth = bitmap.width,
                 frameHeight = bitmap.height,
+                captureCount = it.captureCount + 1,
                 lastCaptureTimestamp = System.currentTimeMillis(),
-                statusText = "Tela compartilhada ao vivo (${bitmap.width}×${bitmap.height})",
+                statusText = if (it.isAnalyzing) {
+                    "Analisando captura de tela com IA…"
+                } else {
+                    "Tela compartilhada ao vivo (${bitmap.width}×${bitmap.height})"
+                },
                 errorMessage = null
             )
         }
@@ -77,9 +98,40 @@ class ScreenVisionManager {
                 hasFrame = true,
                 frameWidth = scaled.width,
                 frameHeight = scaled.height,
+                captureCount = it.captureCount + 1,
                 lastCaptureTimestamp = System.currentTimeMillis(),
                 statusText = if (it.isSharing) it.statusText else "Captura anexada para análise visual",
                 errorMessage = null
+            )
+        }
+    }
+
+    fun markAnalyzing(analyzing: Boolean) {
+        _state.update {
+            it.copy(
+                isAnalyzing = analyzing,
+                statusText = when {
+                    analyzing -> "Interpretando captura de tela com o motor de IA atual…"
+                    it.isSharing && it.hasFrame -> "Tela compartilhada ao vivo (${it.frameWidth}×${it.frameHeight})"
+                    it.isSharing -> "Aguardando primeiro quadro da tela…"
+                    else -> it.statusText
+                }
+            )
+        }
+    }
+
+    fun recordVisualInterpretation(summary: String, engineLabel: String) {
+        val compact = summary.replace(Regex("\\s+"), " ").trim().take(280)
+        _state.update {
+            it.copy(
+                isAnalyzing = false,
+                lastVisualSummary = compact,
+                lastAnalyzedEngine = engineLabel,
+                statusText = if (it.isSharing) {
+                    "Contexto visual atualizado via $engineLabel"
+                } else {
+                    "Última captura interpretada via $engineLabel"
+                }
             )
         }
     }
@@ -96,6 +148,7 @@ class ScreenVisionManager {
         _state.update {
             it.copy(
                 isSharing = true,
+                isAnalyzing = false,
                 statusText = "Aguardando primeiro quadro da tela…",
                 errorMessage = null
             )
@@ -107,6 +160,7 @@ class ScreenVisionManager {
         _state.value = ScreenShareState(
             isSharing = false,
             hasFrame = false,
+            isAnalyzing = false,
             statusText = if (error != null) "Erro na captura de tela" else "Compartilhamento de tela encerrado",
             errorMessage = error
         )

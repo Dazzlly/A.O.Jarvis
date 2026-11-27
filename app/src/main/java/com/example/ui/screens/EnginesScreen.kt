@@ -74,8 +74,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.assistant.DefaultAssistantStatus
+import com.example.cloud.CloudSyncSummary
 import com.example.core.AppUpdateState
 import com.example.core.AutonomyPermissionItem
+import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.FdroidRepoCheckState
 import com.example.core.IntegrationResult
@@ -164,15 +167,27 @@ fun EnginesScreen(
     onOpenGitHubRelease: (String) -> Result<String>,
     onOpenInFdroid: (String) -> Result<String>,
     deviceSettingsSnapshot: DeviceSettingsSnapshot,
+    deviceControlServiceState: DeviceControlServiceState,
+    onToggleDeviceControlService: () -> Unit,
     onRefreshDeviceSettings: () -> Unit,
     onOpenWriteSettingsPermission: () -> IntegrationResult,
     onOpenDndPermission: () -> IntegrationResult,
     onSetDeviceBrightness: (Int) -> IntegrationResult,
     onSetDeviceVolume: (Int) -> IntegrationResult,
+    onToggleDeviceWifi: (Boolean) -> IntegrationResult,
+    onToggleDeviceBluetooth: (Boolean) -> IntegrationResult,
     onToggleDeviceTorch: (Boolean) -> IntegrationResult,
     onToggleDeviceAutoRotate: (Boolean) -> IntegrationResult,
     onToggleDeviceDnd: (Boolean) -> IntegrationResult,
     onOpenDevicePanel: (String) -> IntegrationResult,
+    cloudSyncSummary: CloudSyncSummary,
+    onSyncCloudNow: () -> Unit,
+    onSignOutGoogle: () -> Unit,
+    defaultAssistantStatus: DefaultAssistantStatus,
+    onRefreshDefaultAssistant: () -> Unit,
+    onRequestSetDefaultAssistant: () -> Unit,
+    onOpenDefaultAssistantSettings: () -> IntegrationResult,
+    onTestDefaultAssistantTrigger: () -> Unit,
     onUpdateThemeMode: (AppThemeMode) -> Unit,
     onUpdateCustomAccentColor: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -212,11 +227,31 @@ fun EnginesScreen(
                     style = MaterialTheme.typography.headlineMedium
                 )
                 Text(
-                    text = "Configure roteamento local-first do OpenJarvis entre seu PC com Ollama, Gemini Cloud e comandos offline.",
+                    text = "Configure conta Firebase, Assistente Padrão, roteamento entre Ollama LAN, Gemini Cloud e comandos offline.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+
+        // 0A. Firebase Account & Cloud Firestore Sync
+        item {
+            CloudAccountCard(
+                cloudSyncSummary = cloudSyncSummary,
+                onSyncNow = onSyncCloudNow,
+                onSignOut = onSignOutGoogle
+            )
+        }
+
+        // 0B. Android Default Digital Assistant Configuration
+        item {
+            DefaultAssistantCard(
+                status = defaultAssistantStatus,
+                onRefreshStatus = onRefreshDefaultAssistant,
+                onRequestSetDefaultAssistant = onRequestSetDefaultAssistant,
+                onOpenAssistantSettings = onOpenDefaultAssistantSettings,
+                onTestAssistantTrigger = onTestDefaultAssistantTrigger
+            )
         }
 
         // 1. Routing Policy
@@ -828,11 +863,15 @@ fun EnginesScreen(
         item {
             DeviceControlCard(
                 snapshot = deviceSettingsSnapshot,
+                serviceState = deviceControlServiceState,
+                onToggleService = onToggleDeviceControlService,
                 onRefreshSnapshot = onRefreshDeviceSettings,
                 onOpenWriteSettingsPermission = onOpenWriteSettingsPermission,
                 onOpenDndPermission = onOpenDndPermission,
                 onSetBrightness = onSetDeviceBrightness,
                 onSetVolume = onSetDeviceVolume,
+                onToggleWifi = onToggleDeviceWifi,
+                onToggleBluetooth = onToggleDeviceBluetooth,
                 onToggleTorch = onToggleDeviceTorch,
                 onToggleAutoRotate = onToggleDeviceAutoRotate,
                 onToggleDnd = onToggleDeviceDnd,

@@ -476,6 +476,20 @@ class OfflineCommandEngine(
     }
 
     private fun tryHandleDeviceSettings(clean: String): OfflineMatchResult? {
+        // Device Control Foreground Service voice activation
+        if (clean.contains("servico de controle") || clean.contains("controle do dispositivo") || clean.contains("gerenciador de permissoes")) {
+            val stop = clean.contains("parar") || clean.contains("desligar") || clean.contains("desativar") || clean.contains("encerrar")
+            appSelfController.emitCommand(AppUiCommand.ToggleDeviceControlService(!stop))
+            return OfflineMatchResult.Handled(
+                responseText = if (stop) {
+                    "Encerrando o serviço em primeiro plano de controle do dispositivo."
+                } else {
+                    "Iniciando o serviço em primeiro plano de gerenciamento de permissões e controle de brilho, volume, Wi-Fi e Bluetooth."
+                },
+                toolName = "device:foreground-service"
+            )
+        }
+
         // Flashlight / Torch
         if (clean.contains("lanterna") || clean.contains("flash")) {
             val turnOff = clean.contains("desligar") || clean.contains("apagar") || clean.contains("desativar")
@@ -483,18 +497,18 @@ class OfflineCommandEngine(
             return OfflineMatchResult.Handled(res.message, res.toolName)
         }
 
-        // Brightness
-        if (clean.contains("brilho")) {
+        // Brightness (PT-BR & EN)
+        if (clean.contains("brilho") || clean.contains("brightness")) {
             val res = when {
-                clean.contains("automatico") -> {
-                    val disable = clean.contains("desativar") || clean.contains("desligar") || clean.contains("tirar")
+                clean.contains("automatico") || clean.contains("auto") -> {
+                    val disable = clean.contains("desativar") || clean.contains("desligar") || clean.contains("tirar") || clean.contains("off")
                     deviceSettingsController.setAutoBrightness(!disable)
                 }
-                clean.contains("maximo") || clean.contains("100") -> deviceSettingsController.setBrightnessPercent(100)
-                clean.contains("minimo") -> deviceSettingsController.setBrightnessPercent(10)
-                clean.contains("aumentar") || clean.contains("subir") || clean.contains("mais brilho") ->
+                clean.contains("maximo") || clean.contains("max") || clean.contains("100") -> deviceSettingsController.setBrightnessPercent(100)
+                clean.contains("minimo") || clean.contains("min") -> deviceSettingsController.setBrightnessPercent(10)
+                clean.contains("aumentar") || clean.contains("subir") || clean.contains("mais brilho") || clean.contains("up") || clean.contains("increase") ->
                     deviceSettingsController.adjustBrightness(25)
-                clean.contains("diminuir") || clean.contains("baixar") || clean.contains("reduzir") || clean.contains("menos brilho") ->
+                clean.contains("diminuir") || clean.contains("baixar") || clean.contains("reduzir") || clean.contains("menos brilho") || clean.contains("down") || clean.contains("decrease") ->
                     deviceSettingsController.adjustBrightness(-25)
                 else -> {
                     val pct = Regex("(\\d{1,3})").find(clean)?.groupValues?.get(1)?.toIntOrNull()
@@ -504,16 +518,16 @@ class OfflineCommandEngine(
             if (res != null) return OfflineMatchResult.Handled(res.message, res.toolName)
         }
 
-        // Volume
-        if (clean.contains("volume") || clean == "mutar" || clean == "tirar som" || clean == "silenciar midia") {
+        // Volume (PT-BR & EN)
+        if (clean.contains("volume") || clean == "mutar" || clean == "mute" || clean == "tirar som" || clean == "silenciar midia") {
             val res = when {
                 clean.contains("painel") -> deviceSettingsController.openSystemPanelOrSettings("volume")
-                clean.contains("mutar") || clean.contains("mudo") || clean.contains("zero") || clean == "tirar som" ->
+                clean.contains("mutar") || clean.contains("mudo") || clean.contains("mute") || clean.contains("zero") || clean == "tirar som" ->
                     deviceSettingsController.setMediaVolumePercent(0)
-                clean.contains("maximo") || clean.contains("100") -> deviceSettingsController.setMediaVolumePercent(100)
-                clean.contains("aumentar") || clean.contains("subir") || clean.contains("mais alto") ->
+                clean.contains("maximo") || clean.contains("max") || clean.contains("100") -> deviceSettingsController.setMediaVolumePercent(100)
+                clean.contains("aumentar") || clean.contains("subir") || clean.contains("mais alto") || clean.contains("up") || clean.contains("increase") ->
                     deviceSettingsController.adjustMediaVolume(3)
-                clean.contains("diminuir") || clean.contains("baixar") || clean.contains("reduzir") || clean.contains("mais baixo") ->
+                clean.contains("diminuir") || clean.contains("baixar") || clean.contains("reduzir") || clean.contains("mais baixo") || clean.contains("down") || clean.contains("decrease") ->
                     deviceSettingsController.adjustMediaVolume(-3)
                 else -> {
                     val pct = Regex("(\\d{1,3})").find(clean)?.groupValues?.get(1)?.toIntOrNull()
@@ -521,6 +535,34 @@ class OfflineCommandEngine(
                 }
             }
             if (res != null) return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+
+        // Wi-Fi toggle (PT-BR & EN)
+        if (clean.contains("wifi") || clean.contains("wi-fi")) {
+            val isTurnOff = clean.contains("desligar") || clean.contains("desativar") || clean.contains("turn off") || clean.contains("disable")
+            val isTurnOn = clean.contains("ligar") || clean.contains("ativar") || clean.contains("turn on") || clean.contains("enable")
+            val isPanel = clean.contains("painel") || clean.contains("configurar") || clean.contains("abrir") || clean.contains("alternar") || clean.contains("toggle")
+            if (isTurnOff || isTurnOn) {
+                val res = deviceSettingsController.toggleWifi(enabled = isTurnOn && !isTurnOff)
+                return OfflineMatchResult.Handled(res.message, res.toolName)
+            } else if (isPanel) {
+                val res = deviceSettingsController.openSystemPanelOrSettings("wifi")
+                return OfflineMatchResult.Handled(res.message, res.toolName)
+            }
+        }
+
+        // Bluetooth toggle (PT-BR & EN)
+        if (clean.contains("bluetooth")) {
+            val isTurnOff = clean.contains("desligar") || clean.contains("desativar") || clean.contains("turn off") || clean.contains("disable")
+            val isTurnOn = clean.contains("ligar") || clean.contains("ativar") || clean.contains("turn on") || clean.contains("enable")
+            val isPanel = clean.contains("painel") || clean.contains("configurar") || clean.contains("abrir") || clean.contains("alternar") || clean.contains("toggle")
+            if (isTurnOff || isTurnOn) {
+                val res = deviceSettingsController.toggleBluetooth(enabled = isTurnOn && !isTurnOff)
+                return OfflineMatchResult.Handled(res.message, res.toolName)
+            } else if (isPanel) {
+                val res = deviceSettingsController.openSystemPanelOrSettings("bluetooth")
+                return OfflineMatchResult.Handled(res.message, res.toolName)
+            }
         }
 
         // Ringer mode & Do Not Disturb
@@ -561,19 +603,6 @@ class OfflineCommandEngine(
             }
         }
 
-        // System Settings Panels (Wi-Fi, Bluetooth, Battery, Location, Airplane mode)
-        if (clean.contains("painel wi-fi") || clean.contains("painel wifi") || clean.contains("configurar wifi") ||
-            clean.contains("configurar wi-fi") || clean.contains("ligar wifi") || clean.contains("desligar wifi")
-        ) {
-            val res = deviceSettingsController.openSystemPanelOrSettings("wifi")
-            return OfflineMatchResult.Handled(res.message, res.toolName)
-        }
-        if (clean.contains("painel bluetooth") || clean.contains("configurar bluetooth") ||
-            clean.contains("ligar bluetooth") || clean.contains("desligar bluetooth")
-        ) {
-            val res = deviceSettingsController.openSystemPanelOrSettings("bluetooth")
-            return OfflineMatchResult.Handled(res.message, res.toolName)
-        }
         if (clean.contains("economia de bateria") || clean.contains("modo economia")) {
             val res = deviceSettingsController.openSystemPanelOrSettings("bateria")
             return OfflineMatchResult.Handled(res.message, res.toolName)

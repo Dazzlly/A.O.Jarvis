@@ -1,0 +1,164 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile for A.O.Jarvis cloud sync.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name from Google Sign-In."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address (private to owner)."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional Google profile photo URL."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "displayName", "createdAt", "updatedAt"]
+    },
+    "CloudMemory": {
+      "title": "CloudMemory",
+      "description": "Durable user memory synced to Firestore for A.O.Jarvis context.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the memory owner."
+        },
+        "key": {
+          "type": "string",
+          "description": "Short title or topic key for the memory."
+        },
+        "content": {
+          "type": "string",
+          "description": "Detailed memory text remembered by the assistant."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category label (e.g. Geral, Preferência, Trabalho)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "key", "content", "category", "createdAt", "updatedAt"]
+    },
+    "CloudVoiceCommand": {
+      "title": "CloudVoiceCommand",
+      "description": "Custom user voice command routine synced to Firestore.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the command owner."
+        },
+        "triggerPhrase": {
+          "type": "string",
+          "description": "Voice trigger phrase that activates this routine."
+        },
+        "actionType": {
+          "type": "string",
+          "enum": ["OFFLINE_RESPONSE", "LOCAL_WEBHOOK", "AGENT_PROMPT"],
+          "description": "Execution mode for the voice command."
+        },
+        "actionPayload": {
+          "type": "string",
+          "description": "Response text, webhook URL, or agent prompt payload."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the voice command is currently enabled."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "triggerPhrase", "actionType", "actionPayload", "enabled", "createdAt", "updatedAt"]
+    },
+    "CloudSession": {
+      "title": "CloudSession",
+      "description": "Synced metadata for an A.O.Jarvis conversation session.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the session owner."
+        },
+        "title": {
+          "type": "string",
+          "description": "Display title of the conversation session."
+        },
+        "lastMessagePreview": {
+          "type": "string",
+          "description": "Optional preview snippet of the latest message."
+        },
+        "messageCount": {
+          "type": "integer",
+          "description": "Total number of messages in the session."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "title", "messageCount", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile document isolated per authenticated UID."
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/CloudMemory" },
+      "description": "User-scoped long-term memories synced across devices."
+    },
+    "/users/{userId}/voice_commands/{commandId}": {
+      "schema": { "$ref": "#/entities/CloudVoiceCommand" },
+      "description": "User-scoped custom voice commands synced across devices."
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/CloudSession" },
+      "description": "User-scoped conversation session metadata synced across devices."
+    }
+  }
+}

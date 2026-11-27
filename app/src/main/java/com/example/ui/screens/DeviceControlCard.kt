@@ -15,13 +15,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.rounded.FlashlightOn
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.SettingsApplications
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.IntegrationResult
 import kotlin.math.roundToInt
@@ -51,11 +55,15 @@ import kotlin.math.roundToInt
 @Composable
 fun DeviceControlCard(
     snapshot: DeviceSettingsSnapshot,
+    serviceState: DeviceControlServiceState,
+    onToggleService: () -> Unit,
     onRefreshSnapshot: () -> Unit,
     onOpenWriteSettingsPermission: () -> IntegrationResult,
     onOpenDndPermission: () -> IntegrationResult,
     onSetBrightness: (Int) -> IntegrationResult,
     onSetVolume: (Int) -> IntegrationResult,
+    onToggleWifi: (Boolean) -> IntegrationResult,
+    onToggleBluetooth: (Boolean) -> IntegrationResult,
     onToggleTorch: (Boolean) -> IntegrationResult,
     onToggleAutoRotate: (Boolean) -> IntegrationResult,
     onToggleDnd: (Boolean) -> IntegrationResult,
@@ -93,7 +101,7 @@ fun DeviceControlCard(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Permita que o OpenJarvis altere brilho, volume, lanterna, rotação, Não Perturbe e painéis do sistema",
+                        text = "Permita que o A.O.Jarvis altere brilho, volume, Wi-Fi, Bluetooth, lanterna, rotação e Não Perturbe por voz",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -103,6 +111,65 @@ fun DeviceControlCard(
                     modifier = Modifier.testTag("refresh_device_settings_button")
                 ) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar estado do dispositivo")
+                }
+            }
+
+            // Dedicated Foreground Service Status & Toggle
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (serviceState.isRunning) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (serviceState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.NotificationsActive,
+                            contentDescription = null,
+                            tint = if (serviceState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (serviceState.isRunning) {
+                                    "Serviço de Controle Ativo (Foreground)"
+                                } else {
+                                    "Serviço de Controle em Primeiro Plano"
+                                },
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Text(
+                                text = serviceState.lastActionMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = serviceState.isRunning,
+                            onCheckedChange = { onToggleService() },
+                            modifier = Modifier.testTag("switch_device_control_service")
+                        )
+                    }
+                    if (serviceState.missingPermissionsList.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Pendentes: ${serviceState.missingPermissionsList.joinToString(", ")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
             }
 
@@ -228,7 +295,27 @@ fun DeviceControlCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Quick toggles: Torch, Auto-Rotate, Do Not Disturb
+            // Quick toggles: Wi-Fi, Bluetooth, Torch, Auto-Rotate, Do Not Disturb
+            DeviceToggleRow(
+                icon = Icons.Rounded.Wifi,
+                title = "Wi-Fi",
+                checked = snapshot.isWifiEnabled,
+                onCheckedChange = { enabled ->
+                    val res = onToggleWifi(enabled)
+                    Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                },
+                testTag = "switch_device_wifi"
+            )
+            DeviceToggleRow(
+                icon = Icons.Rounded.Bluetooth,
+                title = "Bluetooth",
+                checked = snapshot.isBluetoothEnabled,
+                onCheckedChange = { enabled ->
+                    val res = onToggleBluetooth(enabled)
+                    Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                },
+                testTag = "switch_device_bluetooth"
+            )
             DeviceToggleRow(
                 icon = Icons.Rounded.FlashlightOn,
                 title = "Lanterna (Flash)",

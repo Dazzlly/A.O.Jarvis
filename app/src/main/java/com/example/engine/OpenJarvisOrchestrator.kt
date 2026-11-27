@@ -121,17 +121,22 @@ class OpenJarvisOrchestrator(
                 )
             }
         val memories = database.memoryDao().getAllMemories()
-        val isScreenSharing = screenVisionManager.state.value.isSharing
-        val effectiveBitmap = attachedBitmap ?: if (isScreenSharing || screenVisionManager.state.value.hasFrame) {
+        val screenState = screenVisionManager.state.value
+        val isScreenSharing = screenState.isSharing
+        val effectiveBitmap = attachedBitmap ?: if (isScreenSharing || screenState.hasFrame) {
             screenVisionManager.getLatestFrameCopy()
         } else {
             null
+        }
+        if (effectiveBitmap != null) {
+            screenVisionManager.markAnalyzing(true)
         }
 
         val selfAwarenessContext = appSelfController.buildSelfAwarenessPrompt(
             settings = settings,
             isBackgroundRunning = isBackgroundRunningProvider(),
-            isScreenSharing = isScreenSharing
+            isScreenSharing = isScreenSharing,
+            lastVisualSummary = screenState.lastVisualSummary
         )
 
         // 3. Delegate routing between Local Ollama (Wi-Fi) and Gemini API (Firebase AI Logic + Vision)
@@ -171,6 +176,12 @@ class OpenJarvisOrchestrator(
                     val finalReplyText = parsed.cleanText.ifBlank {
                         executedNotes.joinToString(" ").ifBlank { "Ação executada." }
                     }
+                    if (effectiveBitmap != null) {
+                        screenVisionManager.recordVisualInterpretation(
+                            summary = finalReplyText,
+                            engineLabel = event.modelName
+                        )
+                    }
 
                     recordAssistantAndTrace(
                         sessionId = sessionId,
@@ -186,6 +197,9 @@ class OpenJarvisOrchestrator(
                 }
 
                 is InferenceStreamEvent.Error -> {
+                    if (effectiveBitmap != null) {
+                        screenVisionManager.markAnalyzing(false)
+                    }
                     recordAssistantAndTrace(
                         sessionId = sessionId,
                         text = event.message,

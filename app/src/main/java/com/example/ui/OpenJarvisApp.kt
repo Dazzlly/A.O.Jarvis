@@ -70,8 +70,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.cloud.signOutWithCredentialClear
 import com.example.core.AppDestination
 import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
@@ -99,8 +106,14 @@ enum class JarvisTab(
 }
 
 @Composable
-fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
+fun OpenJarvisApp(
+    viewModel: OpenJarvisViewModel,
+    assistantLaunchSignal: Int = 0
+) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val credentialManager = remember(context) { CredentialManager.create(context) }
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val activeSessionId by viewModel.activeSessionId.collectAsStateWithLifecycle()
@@ -123,6 +136,9 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
     val fdroidRepoStatus by viewModel.fdroidRepoStatus.collectAsStateWithLifecycle()
     val screenShareState by viewModel.screenShareState.collectAsStateWithLifecycle()
     val deviceSettingsSnapshot by viewModel.deviceSettingsSnapshot.collectAsStateWithLifecycle()
+    val deviceControlServiceState by viewModel.deviceControlServiceState.collectAsStateWithLifecycle()
+    val cloudSyncSummary by viewModel.cloudSyncSummary.collectAsStateWithLifecycle()
+    val defaultAssistantStatus by viewModel.defaultAssistantStatus.collectAsStateWithLifecycle()
     val selfEvolutionState by viewModel.selfEvolutionState.collectAsStateWithLifecycle()
     val hasGitHubToken by viewModel.hasGitHubToken.collectAsStateWithLifecycle()
 
@@ -216,6 +232,31 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
         }
     }
 
+    val defaultAssistantRoleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.refreshDefaultAssistantStatus()
+        if (result.resultCode == Activity.RESULT_OK) {
+            Toast.makeText(
+                context,
+                "A.O.Jarvis definido como Assistente Digital Padrão!",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // Auto-refresh Default Assistant & Device Settings when returning from Android system settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshDefaultAssistantStatus()
+                viewModel.refreshDeviceSettings()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     fun requestAllAutonomyPermissions() {
         val missing = PermissionsManager.missingPermissions(context)
         if (missing.isEmpty()) {
@@ -264,6 +305,34 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
             includeNotifications = true,
             onGranted = startProjection
         )
+    }
+
+    fun launchDefaultAssistantConfigFlow() {
+        val roleIntent = viewModel.createDefaultAssistantRoleIntent()
+        if (roleIntent != null) {
+            runCatching {
+                defaultAssistantRoleLauncher.launch(roleIntent)
+            }.onFailure {
+                val fallback = viewModel.openDefaultAssistantSettings()
+                Toast.makeText(context, fallback.message, Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            val res = viewModel.openDefaultAssistantSettings()
+            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Automatically open Console and start voice listening when triggered via Default Assistant gesture / ACTION_ASSIST
+    LaunchedEffect(assistantLaunchSignal) {
+        if (assistantLaunchSignal > 0) {
+            currentTab = JarvisTab.CONSOLE
+            selectedConsoleMode = 0
+            requestPermissionsAndRun(requireMic = true, includeNotifications = false) {
+                if (!voiceState.isListening) {
+                    viewModel.onMicButtonClicked()
+                }
+            }
+        }
     }
 
     // Automatically request all available safe autonomy permissions on first app entry
@@ -319,6 +388,16 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                         }
                     } else {
                         viewModel.stopBackgroundServiceExplicitly()
+                    }
+                }
+
+                is AppUiCommand.ToggleDeviceControlService -> {
+                    if (command.shouldRun) {
+                        requestPermissionsAndRun(requireMic = false, includeNotifications = true) {
+                            viewModel.startDeviceControlService()
+                        }
+                    } else {
+                        viewModel.stopDeviceControlService()
                     }
                 }
 
@@ -620,15 +699,54 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                     onOpenGitHubRelease = { viewModel.openGitHubRelease(it) },
                                     onOpenInFdroid = { viewModel.openInFdroid(it) },
                                     deviceSettingsSnapshot = deviceSettingsSnapshot,
+                                    deviceControlServiceState = deviceControlServiceState,
+                                    onToggleDeviceControlService = {
+                                        if (deviceControlServiceState.isRunning) {
+                                            viewModel.stopDeviceControlService()
+                                        } else {
+                                            requestPermissionsAndRun(
+                                                requireMic = false,
+                                                includeNotifications = true
+                                            ) {
+                                                viewModel.startDeviceControlService()
+                                            }
+                                        }
+                                    },
                                     onRefreshDeviceSettings = { viewModel.refreshDeviceSettings() },
                                     onOpenWriteSettingsPermission = { viewModel.openWriteSettingsPermission() },
                                     onOpenDndPermission = { viewModel.openDndAccessPermission() },
                                     onSetDeviceBrightness = { viewModel.setDeviceBrightness(it) },
                                     onSetDeviceVolume = { viewModel.setDeviceVolume(it) },
+                                    onToggleDeviceWifi = { viewModel.toggleDeviceWifi(it) },
+                                    onToggleDeviceBluetooth = { viewModel.toggleDeviceBluetooth(it) },
                                     onToggleDeviceTorch = { viewModel.toggleDeviceTorch(it) },
                                     onToggleDeviceAutoRotate = { viewModel.toggleDeviceAutoRotate(it) },
                                     onToggleDeviceDnd = { viewModel.toggleDeviceDnd(it) },
                                     onOpenDevicePanel = { viewModel.openDeviceSystemPanel(it) },
+                                    cloudSyncSummary = cloudSyncSummary,
+                                    onSyncCloudNow = { viewModel.syncAllToCloud() },
+                                    onSignOutGoogle = {
+                                        signOutWithCredentialClear(
+                                            credentialManager = credentialManager,
+                                            scope = scope,
+                                            onSignOutComplete = {
+                                                Toast.makeText(context, "Sessão Google encerrada.", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    },
+                                    defaultAssistantStatus = defaultAssistantStatus,
+                                    onRefreshDefaultAssistant = { viewModel.refreshDefaultAssistantStatus() },
+                                    onRequestSetDefaultAssistant = { launchDefaultAssistantConfigFlow() },
+                                    onOpenDefaultAssistantSettings = { viewModel.openDefaultAssistantSettings() },
+                                    onTestDefaultAssistantTrigger = {
+                                        currentTab = JarvisTab.CONSOLE
+                                        selectedConsoleMode = 0
+                                        requestPermissionsAndRun(requireMic = true, includeNotifications = false) {
+                                            if (!voiceState.isListening) {
+                                                viewModel.onMicButtonClicked()
+                                            }
+                                        }
+                                    },
                                     onUpdateThemeMode = { viewModel.updateThemeMode(it) },
                                     onUpdateCustomAccentColor = { viewModel.updateCustomAccentColor(it) }
                                 )

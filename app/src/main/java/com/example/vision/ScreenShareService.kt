@@ -26,7 +26,16 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.engine.InferenceStreamEvent
+import com.example.state.CommandSource
 import com.example.voice.JarvisRuntimeCoordinator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 private const val TAG = "ScreenShareService"
 private const val CHANNEL_ID = "openjarvis_screen_share_channel"
@@ -35,12 +44,15 @@ private const val FRAME_THROTTLE_MS = 1_100L
 
 /**
  * Foreground Service dedicado com tipo mediaProjection (obrigatório no Android 14+)
- * que captura a tela em tempo real de forma leve (~1 FPS) para que o OpenJarvis
- * identifique o que o usuário está visualizando com Gemini multimodal.
+ * que captura screenshots da tela em tempo real (~1 FPS) e permite enviá-los diretamente
+ * ao motor de IA ativo (Gemini Cloud ou Ollama local) para interpretação visual e consciência de contexto.
  */
 class ScreenShareService : Service() {
 
     private lateinit var coordinator: JarvisRuntimeCoordinator
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var analysisJob: Job? = null
+
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
@@ -69,10 +81,19 @@ class ScreenShareService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                analysisJob?.cancel()
                 tearDownProjection()
                 coordinator.screenVisionManager.markServiceStopped()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
+                return START_NOT_STICKY
+            }
+
+            ACTION_CAPTURE_AND_ANALYZE -> {
+                val prompt = intent.getStringExtra(EXTRA_ANALYSIS_PROMPT)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "Identifique o que está visível na minha tela agora e resuma o contexto principal."
+                triggerDirectAiInterpretation(prompt)
                 return START_NOT_STICKY
             }
 
@@ -93,15 +114,59 @@ class ScreenShareService : Service() {
 
                 // Android 14+: MUST call startForeground(..., FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
                 // BEFORE calling MediaProjectionManager.getMediaProjection().
-                startForegroundCompat()
+                startForegroundCompat("Capturando tela para visão de contexto com IA…")
                 startProjection(resultCode, resultData)
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun startForegroundCompat() {
-        val notification = buildNotification()
+    private fun triggerDirectAiInterpretation(prompt: String) {
+        val frame = coordinator.screenVisionManager.getLatestFrameCopy()
+        if (frame == null) {
+            updateNotificationText("Aguardando captura da tela para analisar…")
+            return
+        }
+
+        analysisJob?.cancel()
+        analysisJob = serviceScope.launch {
+            coordinator.screenVisionManager.markAnalyzing(true)
+            updateNotificationText("Interpretando tela com o motor de IA atual…")
+            try {
+                val settings = coordinator.settingsDataStore.settingsFlow.first()
+                coordinator.conversationStateManager.executeCommand(
+                    prompt = prompt,
+                    source = CommandSource.SCREEN_VISION,
+                    attachedBitmap = frame
+                ).collect { event ->
+                    when (event) {
+                        is InferenceStreamEvent.Chunk -> Unit
+                        is InferenceStreamEvent.Completed -> {
+                            coordinator.screenVisionManager.recordVisualInterpretation(
+                                summary = event.fullText,
+                                engineLabel = event.modelName
+                            )
+                            updateNotificationText("Contexto atualizado (${event.modelName}): ${event.fullText.take(64)}")
+                            if (settings.autoSpeakResponses) {
+                                coordinator.speechController.speak(event.fullText)
+                            }
+                        }
+                        is InferenceStreamEvent.Error -> {
+                            coordinator.screenVisionManager.markAnalyzing(false)
+                            updateNotificationText("Falha na análise: ${event.message.take(64)}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Screen interpretation failed: ${e.message}")
+                coordinator.screenVisionManager.markAnalyzing(false)
+                updateNotificationText("Compartilhamento de tela ativo.")
+            }
+        }
+    }
+
+    private fun startForegroundCompat(contentText: String) {
+        val notification = buildNotification(contentText)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -111,6 +176,11 @@ class ScreenShareService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+    }
+
+    private fun updateNotificationText(contentText: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, buildNotification(contentText))
     }
 
     private fun startProjection(resultCode: Int, resultData: Intent) {
@@ -178,6 +248,7 @@ class ScreenShareService : Service() {
                 handler
             )
             coordinator.screenVisionManager.markServiceStarted()
+            updateNotificationText("Tela ao vivo pronta · toque em 'Analisar agora' ou fale um comando.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start screen projection", e)
             tearDownProjection()
@@ -228,12 +299,21 @@ class ScreenShareService : Service() {
         captureHandler = null
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(contentText: String): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this,
             10,
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val analyzeNowIntent = PendingIntent.getService(
+            this,
+            12,
+            Intent(this, ScreenShareService::class.java).apply {
+                action = ACTION_CAPTURE_AND_ANALYZE
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -248,11 +328,13 @@ class ScreenShareService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("A.O.Jarvis visualizando sua tela")
-            .setContentText("Compartilhamento de tela ativo. Pergunte ao Jarvis sobre o que está na tela.")
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(openAppIntent)
-            .addAction(0, "Parar compartilhamento", stopIntent)
+            .addAction(0, "Analisar agora", analyzeNowIntent)
+            .addAction(0, "Parar", stopIntent)
             .build()
     }
 
@@ -264,13 +346,15 @@ class ScreenShareService : Service() {
                 "A.O.Jarvis Visão de Tela",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Indica quando o A.O.Jarvis está recebendo quadros da sua tela para análise visual."
+                description = "Indica quando o A.O.Jarvis está capturando a tela para interpretação visual com IA."
             }
             nm.createNotificationChannel(channel)
         }
     }
 
     override fun onDestroy() {
+        analysisJob?.cancel()
+        serviceScope.cancel()
         tearDownProjection()
         super.onDestroy()
     }
@@ -278,7 +362,9 @@ class ScreenShareService : Service() {
     companion object {
         const val ACTION_START = "com.example.vision.ACTION_START_SCREEN_SHARE"
         const val ACTION_STOP = "com.example.vision.ACTION_STOP_SCREEN_SHARE"
+        const val ACTION_CAPTURE_AND_ANALYZE = "com.example.vision.ACTION_CAPTURE_AND_ANALYZE"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
+        const val EXTRA_ANALYSIS_PROMPT = "extra_analysis_prompt"
     }
 }

@@ -156,19 +156,7 @@ class NetworkEngineManager(
         val effectiveMode = routingOverride ?: settings.routingMode
         val networkSnapshot = _state.value
 
-        if (attachedBitmap != null && !attachedBitmap.isRecycled) {
-            updateActiveEngine(EngineType.GEMINI, "Visão de Tela Multimodal (Gemini Vision)")
-            geminiEngine.streamResponse(
-                prompt = prompt,
-                history = history,
-                memories = memories,
-                settings = settings,
-                selfAwarenessContext = selfAwarenessContext,
-                attachedBitmap = attachedBitmap
-            ).collect { emit(it) }
-            return@flow
-        }
-
+        val hasVisionFrame = attachedBitmap != null && !attachedBitmap.isRecycled
         val targetEngine: EngineType = when (effectiveMode) {
             RoutingMode.OLLAMA -> EngineType.OLLAMA
             RoutingMode.GEMINI -> EngineType.GEMINI
@@ -181,9 +169,18 @@ class NetworkEngineManager(
             if (normalizedUrl == null) {
                 val msg = "Endereço do servidor Ollama inválido: ${settings.ollamaBaseUrl}"
                 if (effectiveMode == RoutingMode.AUTO) {
-                    updateActiveEngine(EngineType.GEMINI, "Fallback para Gemini (URL Ollama inválida)")
-                    geminiEngine.streamResponse(prompt, history, memories, settings, selfAwarenessContext)
-                        .collect { emit(it) }
+                    updateActiveEngine(
+                        EngineType.GEMINI,
+                        if (hasVisionFrame) "Fallback Visão de Tela → Gemini Cloud" else "Fallback para Gemini (URL Ollama inválida)"
+                    )
+                    geminiEngine.streamResponse(
+                        prompt = prompt,
+                        history = history,
+                        memories = memories,
+                        settings = settings,
+                        selfAwarenessContext = selfAwarenessContext,
+                        attachedBitmap = attachedBitmap
+                    ).collect { emit(it) }
                 } else {
                     emit(InferenceStreamEvent.Error(msg, EngineType.OLLAMA, settings.ollamaModel, 0L))
                 }
@@ -192,15 +189,30 @@ class NetworkEngineManager(
 
             if (!networkSnapshot.isWifiConnected && !isLoopbackOrEmulatorHost(normalizedUrl)) {
                 if (effectiveMode == RoutingMode.AUTO) {
-                    updateActiveEngine(EngineType.GEMINI, "Wi-Fi desconectado — roteando para Gemini Cloud")
-                    geminiEngine.streamResponse(prompt, history, memories, settings, selfAwarenessContext)
-                        .collect { emit(it) }
+                    updateActiveEngine(
+                        EngineType.GEMINI,
+                        if (hasVisionFrame) "Visão de Tela → Gemini Cloud (sem Wi-Fi)" else "Wi-Fi desconectado — roteando para Gemini Cloud"
+                    )
+                    geminiEngine.streamResponse(
+                        prompt = prompt,
+                        history = history,
+                        memories = memories,
+                        settings = settings,
+                        selfAwarenessContext = selfAwarenessContext,
+                        attachedBitmap = attachedBitmap
+                    ).collect { emit(it) }
                     return@flow
                 } else {
-                    updateActiveEngine(EngineType.OLLAMA, "Tentando Ollama sem Wi-Fi ativo")
+                    updateActiveEngine(
+                        EngineType.OLLAMA,
+                        if (hasVisionFrame) "Visão de Tela → Ollama (sem Wi-Fi ativo)" else "Tentando Ollama sem Wi-Fi ativo"
+                    )
                 }
             } else {
-                updateActiveEngine(EngineType.OLLAMA, "Ollama LAN via ${networkSnapshot.transportLabel}")
+                updateActiveEngine(
+                    EngineType.OLLAMA,
+                    if (hasVisionFrame) "Visão de Tela → Ollama LAN (${settings.ollamaModel})" else "Ollama LAN via ${networkSnapshot.transportLabel}"
+                )
             }
 
             var emittedChunk = false
@@ -211,7 +223,8 @@ class NetworkEngineManager(
                 history = history,
                 memories = memories,
                 settings = settings.copy(ollamaBaseUrl = normalizedUrl),
-                selfAwarenessContext = selfAwarenessContext
+                selfAwarenessContext = selfAwarenessContext,
+                attachedBitmap = attachedBitmap
             ).collect { event ->
                 when (event) {
                     is InferenceStreamEvent.Chunk -> {
@@ -241,19 +254,34 @@ class NetworkEngineManager(
             }
 
             if (shouldFallbackToGemini) {
-                updateActiveEngine(EngineType.GEMINI, "Fallback automático: Ollama falhou → Gemini Cloud")
-                geminiEngine.streamResponse(prompt, history, memories, settings, selfAwarenessContext)
-                    .collect { emit(it) }
+                updateActiveEngine(
+                    EngineType.GEMINI,
+                    if (hasVisionFrame) "Fallback Visão de Tela: Ollama → Gemini Vision" else "Fallback automático: Ollama falhou → Gemini Cloud"
+                )
+                geminiEngine.streamResponse(
+                    prompt = prompt,
+                    history = history,
+                    memories = memories,
+                    settings = settings,
+                    selfAwarenessContext = selfAwarenessContext,
+                    attachedBitmap = attachedBitmap
+                ).collect { emit(it) }
             }
         } else {
-            val reason = if (effectiveMode == RoutingMode.GEMINI) {
-                "Modo Gemini Cloud selecionado"
-            } else {
-                "Auto: Gemini Cloud (${networkSnapshot.transportLabel})"
+            val reason = when {
+                hasVisionFrame -> "Visão de Tela Multimodal → Gemini (${settings.geminiModel})"
+                effectiveMode == RoutingMode.GEMINI -> "Modo Gemini Cloud selecionado"
+                else -> "Auto: Gemini Cloud (${networkSnapshot.transportLabel})"
             }
             updateActiveEngine(EngineType.GEMINI, reason)
-            geminiEngine.streamResponse(prompt, history, memories, settings, selfAwarenessContext)
-                .collect { emit(it) }
+            geminiEngine.streamResponse(
+                prompt = prompt,
+                history = history,
+                memories = memories,
+                settings = settings,
+                selfAwarenessContext = selfAwarenessContext,
+                attachedBitmap = attachedBitmap
+            ).collect { emit(it) }
         }
     }
 
