@@ -16,9 +16,10 @@ import kotlinx.coroutines.launch
         ChatMessageEntity::class,
         MemoryEntity::class,
         VoiceCommandEntity::class,
+        OfflineVoiceCommandEntity::class,
         TraceEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class JarvisDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class JarvisDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun memoryDao(): MemoryDao
     abstract fun voiceCommandDao(): VoiceCommandDao
+    abstract fun offlineVoiceCommandDao(): OfflineVoiceCommandDao
     abstract fun traceDao(): TraceDao
 
     companion object {
@@ -53,6 +55,26 @@ abstract class JarvisDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS offline_voice_commands (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        triggerPhrase TEXT NOT NULL,
+                        aliases TEXT NOT NULL,
+                        actionKey TEXT NOT NULL,
+                        actionArgument TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        usageCount INTEGER NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): JarvisDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { INSTANCE = it }
@@ -65,7 +87,7 @@ abstract class JarvisDatabase : RoomDatabase() {
                 JarvisDatabase::class.java,
                 "openjarvis_local.db"
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -108,6 +130,9 @@ abstract class JarvisDatabase : RoomDatabase() {
                     actionPayload = "Faça um resumo objetivo das minhas memórias salvas e sugira as 3 prioridades técnicas do dia."
                 )
             )
+
+            val offlineRepo = OfflineVoiceCommandRepository(database.offlineVoiceCommandDao())
+            offlineRepo.ensureDefaultCommandsSeeded()
 
             val memoryDao = database.memoryDao()
             memoryDao.insertMemory(

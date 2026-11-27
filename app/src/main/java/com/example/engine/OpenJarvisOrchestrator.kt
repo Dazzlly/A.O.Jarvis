@@ -3,6 +3,7 @@ package com.example.engine
 import android.graphics.Bitmap
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
+import com.example.core.BatteryStatusSnapshot
 import com.example.core.DeviceSettingsController
 import com.example.data.ChatMessageEntity
 import com.example.data.DEFAULT_SESSION_ID
@@ -26,7 +27,8 @@ class OpenJarvisOrchestrator(
     val integrationManager: AppIntegrationManager,
     val deviceSettingsController: DeviceSettingsController,
     val screenVisionManager: ScreenVisionManager,
-    private val isBackgroundRunningProvider: () -> Boolean = { false }
+    private val isBackgroundRunningProvider: () -> Boolean = { false },
+    private val batteryStatusProvider: () -> BatteryStatusSnapshot? = { null }
 ) {
     val geminiEngine: GeminiInferenceEngine get() = networkEngineManager.geminiEngine
     val ollamaEngine: OllamaInferenceEngine get() = networkEngineManager.ollamaEngine
@@ -136,7 +138,9 @@ class OpenJarvisOrchestrator(
             settings = settings,
             isBackgroundRunning = isBackgroundRunningProvider(),
             isScreenSharing = isScreenSharing,
-            lastVisualSummary = screenState.lastVisualSummary
+            lastVisualSummary = screenState.lastVisualSummary,
+            batteryStatus = batteryStatusProvider(),
+            deviceSettings = deviceSettingsController.readSnapshot()
         )
 
         // 3. Delegate routing between Local Ollama (Wi-Fi) and Gemini API (Firebase AI Logic + Vision)

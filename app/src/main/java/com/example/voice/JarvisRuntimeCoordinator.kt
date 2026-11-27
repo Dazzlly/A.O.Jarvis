@@ -6,6 +6,8 @@ import androidx.core.content.ContextCompat
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
 import com.example.core.AppUpdateManager
+import com.example.core.BatteryStatusMonitor
+import com.example.core.BatteryStatusSnapshot
 import com.example.core.DeviceControlForegroundService
 import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsController
@@ -13,6 +15,7 @@ import com.example.core.DeviceSettingsSnapshot
 import com.example.core.SecureTokenStore
 import com.example.core.SelfEvolutionManager
 import com.example.data.JarvisDatabase
+import com.example.data.OfflineVoiceCommandRepository
 import com.example.data.SettingsDataStore
 import com.example.engine.GeminiInferenceEngine
 import com.example.engine.GeminiLiveManager
@@ -49,6 +52,8 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
     val lanServerState: StateFlow<LanServerState> = _lanServerState.asStateFlow()
 
     val database: JarvisDatabase = JarvisDatabase.getInstance(appContext)
+    val offlineVoiceCommandRepository: OfflineVoiceCommandRepository =
+        OfflineVoiceCommandRepository(database.offlineVoiceCommandDao())
     val settingsDataStore: SettingsDataStore = SettingsDataStore(appContext)
     val speechController: NativeSpeechController = NativeSpeechController(appContext)
     val integrationManager: AppIntegrationManager = AppIntegrationManager(appContext)
@@ -60,6 +65,7 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
         DeviceControlServiceState(
             isRunning = false,
             snapshot = deviceSettingsController.readSnapshot(),
+            batteryStatus = BatteryStatusMonitor.readSnapshot(appContext),
             lastUpdatedAt = System.currentTimeMillis()
         )
     )
@@ -81,12 +87,17 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
         context = appContext,
         memoryDao = database.memoryDao(),
         voiceCommandDao = database.voiceCommandDao(),
+        offlineVoiceCommandRepository = offlineVoiceCommandRepository,
         settingsDataStore = settingsDataStore,
         ollamaEngine = ollamaEngine,
         integrationManager = integrationManager,
         appSelfController = appSelfController,
         deviceSettingsController = deviceSettingsController,
-        screenVisionManager = screenVisionManager
+        screenVisionManager = screenVisionManager,
+        batteryStatusProvider = {
+            _deviceControlServiceState.value.batteryStatus.takeIf { it.isKnown }
+                ?: BatteryStatusMonitor.readSnapshot(appContext)
+        }
     )
     val orchestrator: OpenJarvisOrchestrator = OpenJarvisOrchestrator(
         database = database,
@@ -97,7 +108,11 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
         integrationManager = integrationManager,
         deviceSettingsController = deviceSettingsController,
         screenVisionManager = screenVisionManager,
-        isBackgroundRunningProvider = { _voiceState.value.isBackgroundRunning }
+        isBackgroundRunningProvider = { _voiceState.value.isBackgroundRunning },
+        batteryStatusProvider = {
+            _deviceControlServiceState.value.batteryStatus.takeIf { it.isKnown }
+                ?: BatteryStatusMonitor.readSnapshot(appContext)
+        }
     )
     val conversationStateManager: ConversationStateManager = ConversationStateManager(
         database = database,
@@ -160,12 +175,14 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
     fun updateDeviceControlServiceState(
         isRunning: Boolean? = null,
         snapshot: DeviceSettingsSnapshot? = null,
+        batteryStatus: BatteryStatusSnapshot? = null,
         lastActionMessage: String? = null
     ) {
         _deviceControlServiceState.update { current ->
             current.copy(
                 isRunning = isRunning ?: current.isRunning,
                 snapshot = snapshot ?: deviceSettingsController.readSnapshot(),
+                batteryStatus = batteryStatus ?: current.batteryStatus,
                 lastActionMessage = lastActionMessage ?: current.lastActionMessage,
                 lastUpdatedAt = System.currentTimeMillis()
             )

@@ -46,6 +46,19 @@ data class VoiceCommandEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "offline_voice_commands")
+data class OfflineVoiceCommandEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val triggerPhrase: String,
+    val aliases: String = "",
+    val actionKey: String, // "TORCH_ON", "TORCH_OFF", "POWER_SAVE", "BATTERY_STATUS", "DEVICE_SETTING"
+    val actionArgument: String = "",
+    val description: String = "",
+    val enabled: Boolean = true,
+    val usageCount: Int = 0,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "traces")
 data class TraceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,

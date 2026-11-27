@@ -30,6 +30,9 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.BatteryStd
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -94,6 +97,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.core.BatteryStatusSnapshot
 import com.example.data.ChatMessageEntity
 import com.example.data.ConversationSessionEntity
 import com.example.data.JarvisSettings
@@ -103,7 +107,9 @@ import com.example.engine.NetworkEngineState
 import com.example.state.AssistantState
 import com.example.ui.StreamingUiState
 import com.example.ui.components.EngineBadge
+import com.example.ui.components.TronPulseHaloBox
 import com.example.ui.components.VoiceOrbVisualizer
+import com.example.ui.components.rememberTronPulseState
 import com.example.vision.ScreenShareState
 import com.example.voice.LanServerState
 import com.example.voice.VoiceRuntimeState
@@ -123,6 +129,7 @@ fun ConsoleScreen(
     voiceState: VoiceRuntimeState,
     liveVoiceState: LiveVoiceState,
     screenShareState: ScreenShareState,
+    batteryStatus: BatteryStatusSnapshot,
     isTtsSpeaking: Boolean,
     selectedMode: Int,
     onSelectMode: (Int) -> Unit,
@@ -154,6 +161,10 @@ fun ConsoleScreen(
 ) {
     var inputText by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val isActivelyListening = voiceState.isListening ||
+        liveVoiceState is LiveVoiceState.Active ||
+        liveVoiceState is LiveVoiceState.Connecting ||
+        (voiceState.isBackgroundRunning && !voiceState.isBackgroundPaused)
 
     LaunchedEffect(messages.size, streamingState, activeSessionId) {
         if (messages.isNotEmpty()) {
@@ -167,10 +178,11 @@ fun ConsoleScreen(
             .widthIn(max = 760.dp)
             .padding(horizontal = 16.dp)
     ) {
-        // Hero Header Card with Generated OpenJarvis Banner Artwork
+        // Hero Header Card with Tron Data Disc & Subtle Listening Pulse Animation
         JarvisHeroHeader(
             settings = settings,
             voiceState = voiceState,
+            isActivelyListening = isActivelyListening,
             onToggleBackground = onToggleBackground,
             onClearChat = onClearChat,
             hasMessages = messages.isNotEmpty()
@@ -178,11 +190,13 @@ fun ConsoleScreen(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Live Network, Assistant State Machine & LAN Trigger Status Bar
+        // Live Network, Battery Monitor, Assistant State Machine & LAN Trigger Status Bar
         RuntimeTelemetryRibbon(
             networkState = networkState,
             assistantState = assistantState,
-            lanServerState = lanServerState
+            lanServerState = lanServerState,
+            batteryStatus = batteryStatus,
+            isActivelyListening = isActivelyListening
         )
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -340,6 +354,8 @@ fun ConsoleScreen(
             if (messages.isEmpty() && streamingState !is StreamingUiState.Streaming) {
                 EmptyConsolePlaceholder(
                     settings = settings,
+                    isListening = isActivelyListening,
+                    rmsDb = voiceState.rmsDb,
                     onQuickPrompt = onSendPrompt,
                     onStartGuidedTour = onStartGuidedTour,
                     modifier = Modifier.weight(1f)
@@ -430,38 +446,45 @@ fun ConsoleScreen(
                 )
 
                 val isMicHot = voiceState.isListening && !voiceState.isBackgroundRunning
-                FilledTonalIconButton(
-                    onClick = {
-                        if (!hasMicPermission) onRequestMicPermission() else onMicClick()
-                    },
-                    modifier = Modifier
-                        .size(50.dp)
-                        .testTag("native_mic_button"),
-                    colors = if (isMicHot) {
-                        IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError
-                        )
-                    } else {
-                        IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                val isMicPulsing = isMicHot || (voiceState.isBackgroundRunning && !voiceState.isBackgroundPaused)
+                TronPulseHaloBox(
+                    isListening = isMicPulsing,
+                    haloSize = 58.dp,
+                    pulseColor = if (isMicHot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                ) {
+                    FilledTonalIconButton(
+                        onClick = {
+                            if (!hasMicPermission) onRequestMicPermission() else onMicClick()
+                        },
+                        modifier = Modifier
+                            .size(50.dp)
+                            .testTag("native_mic_button"),
+                        colors = if (isMicHot) {
+                            IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        } else {
+                            IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                voiceState.isBackgroundRunning && voiceState.isBackgroundPaused -> Icons.Rounded.PlayArrow
+                                voiceState.isBackgroundRunning -> Icons.Rounded.Pause
+                                isMicHot -> Icons.Rounded.Stop
+                                else -> Icons.Rounded.Mic
+                            },
+                            contentDescription = if (isMicHot) {
+                                stringResource(R.string.cd_stop_listening)
+                            } else {
+                                stringResource(R.string.cd_mic_listen)
+                            }
                         )
                     }
-                ) {
-                    Icon(
-                        imageVector = when {
-                            voiceState.isBackgroundRunning && voiceState.isBackgroundPaused -> Icons.Rounded.PlayArrow
-                            voiceState.isBackgroundRunning -> Icons.Rounded.Pause
-                            isMicHot -> Icons.Rounded.Stop
-                            else -> Icons.Rounded.Mic
-                        },
-                        contentDescription = if (isMicHot) {
-                            stringResource(R.string.cd_stop_listening)
-                        } else {
-                            stringResource(R.string.cd_mic_listen)
-                        }
-                    )
                 }
 
                 FilledIconButton(
@@ -638,16 +661,25 @@ private fun ScreenVisionControlStrip(
 private fun JarvisHeroHeader(
     settings: JarvisSettings,
     voiceState: VoiceRuntimeState,
+    isActivelyListening: Boolean,
     onToggleBackground: () -> Unit,
     onClearChat: () -> Unit,
     hasMessages: Boolean
 ) {
+    val pulse = rememberTronPulseState(isListening = isActivelyListening)
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp),
         shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        border = BorderStroke(
+            width = if (isActivelyListening) 1.5.dp else 1.dp,
+            color = if (isActivelyListening) {
+                MaterialTheme.colorScheme.primary.copy(alpha = pulse.borderAlpha)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant
+            }
+        )
     ) {
         Box(
             modifier = Modifier
@@ -685,12 +717,18 @@ private fun JarvisHeroHeader(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.tron_data_disc_transparent),
-                            contentDescription = stringResource(R.string.app_name),
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.size(38.dp)
-                        )
+                        TronPulseHaloBox(
+                            isListening = isActivelyListening,
+                            haloSize = 46.dp,
+                            pulseColor = MaterialTheme.colorScheme.primary
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.tron_data_disc_transparent),
+                                contentDescription = stringResource(R.string.app_name),
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(38.dp)
+                            )
+                        }
                         Text(
                             text = "A.O.Jarvis",
                             style = MaterialTheme.typography.headlineSmall,
@@ -783,6 +821,8 @@ private fun LiveNativeVoiceStrip(
     onToggleAction: () -> Unit,
     onStopSpeaking: () -> Unit
 ) {
+    val isListeningPulse = voiceState.isListening || (voiceState.isBackgroundRunning && !voiceState.isBackgroundPaused)
+    val pulse = rememberTronPulseState(isListening = isListeningPulse)
     Surface(
         color = if (voiceState.isBackgroundRunning) {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f)
@@ -790,6 +830,10 @@ private fun LiveNativeVoiceStrip(
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
         },
         shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(
+            width = if (isListeningPulse) 1.5.dp else 1.dp,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = pulse.borderAlpha)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
@@ -868,6 +912,8 @@ private fun LiveNativeVoiceStrip(
 @Composable
 private fun EmptyConsolePlaceholder(
     settings: JarvisSettings,
+    isListening: Boolean,
+    rmsDb: Float,
     onQuickPrompt: (String) -> Unit,
     onStartGuidedTour: () -> Unit,
     modifier: Modifier = Modifier
@@ -880,14 +926,14 @@ private fun EmptyConsolePlaceholder(
         verticalArrangement = Arrangement.Center
     ) {
         VoiceOrbVisualizer(
-            isActive = false,
-            rmsDb = 0f,
+            isActive = isListening,
+            rmsDb = if (isListening) rmsDb else 0f,
             accentColor = MaterialTheme.colorScheme.primary,
             secondaryColor = MaterialTheme.colorScheme.secondary,
             size = 136.dp
         ) {
             Icon(
-                imageVector = Icons.Rounded.AutoAwesome,
+                imageVector = if (isListening) Icons.Rounded.GraphicEq else Icons.Rounded.AutoAwesome,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(34.dp)
@@ -895,7 +941,7 @@ private fun EmptyConsolePlaceholder(
         }
         Spacer(modifier = Modifier.height(14.dp))
         Text(
-            text = "A.O.Jarvis Pronto",
+            text = if (isListening) "A.O.Jarvis Ouvindo…" else "A.O.Jarvis Pronto",
             style = MaterialTheme.typography.headlineSmall
         )
         Spacer(modifier = Modifier.height(6.dp))
@@ -1030,8 +1076,11 @@ private fun ChatBubbleItem(
 private fun RuntimeTelemetryRibbon(
     networkState: NetworkEngineState,
     assistantState: AssistantState,
-    lanServerState: LanServerState
+    lanServerState: LanServerState,
+    batteryStatus: BatteryStatusSnapshot,
+    isActivelyListening: Boolean
 ) {
+    val pulse = rememberTronPulseState(isListening = isActivelyListening)
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
@@ -1067,18 +1116,73 @@ private fun RuntimeTelemetryRibbon(
             }
         }
 
+        if (batteryStatus.isKnown) {
+            item {
+                Surface(
+                    color = when {
+                        batteryStatus.needsPowerSaving -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.78f)
+                        batteryStatus.isCharging -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f)
+                        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("ribbon_battery_chip")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                batteryStatus.isCharging -> Icons.Rounded.BatteryChargingFull
+                                batteryStatus.needsPowerSaving -> Icons.Rounded.BatteryAlert
+                                else -> Icons.Rounded.BatteryStd
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "${batteryStatus.levelPercent}%" +
+                                if (batteryStatus.needsPowerSaving) " · Economizar" else "",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                shape = RoundedCornerShape(8.dp)
+                color = if (isActivelyListening) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                },
+                shape = RoundedCornerShape(8.dp),
+                border = if (isActivelyListening) {
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = pulse.borderAlpha))
+                } else null
             ) {
-                Text(
-                    text = assistantState.phase.toDisplayLabel(),
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    if (isActivelyListening) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = pulse.borderAlpha))
+                        )
+                    }
+                    Text(
+                        text = if (isActivelyListening) "Ouvindo · ${assistantState.phase.toDisplayLabel()}" else assistantState.phase.toDisplayLabel(),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
 

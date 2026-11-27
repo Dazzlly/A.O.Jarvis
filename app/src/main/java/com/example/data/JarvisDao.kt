@@ -86,6 +86,33 @@ interface VoiceCommandDao {
 }
 
 @Dao
+interface OfflineVoiceCommandDao {
+    @Query("SELECT * FROM offline_voice_commands ORDER BY usageCount DESC, createdAt ASC")
+    fun observeAll(): Flow<List<OfflineVoiceCommandEntity>>
+
+    @Query("SELECT * FROM offline_voice_commands WHERE enabled = 1 ORDER BY usageCount DESC, id ASC")
+    suspend fun getEnabledCommands(): List<OfflineVoiceCommandEntity>
+
+    @Query("SELECT COUNT(*) FROM offline_voice_commands")
+    suspend fun count(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(command: OfflineVoiceCommandEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(commands: List<OfflineVoiceCommandEntity>)
+
+    @Update
+    suspend fun update(command: OfflineVoiceCommandEntity)
+
+    @Query("UPDATE offline_voice_commands SET usageCount = usageCount + 1 WHERE id = :id")
+    suspend fun incrementUsage(id: Long)
+
+    @Query("DELETE FROM offline_voice_commands WHERE id = :id")
+    suspend fun deleteById(id: Long)
+}
+
+@Dao
 interface TraceDao {
     @Query("SELECT * FROM traces ORDER BY timestamp DESC LIMIT 100")
     fun observeTraces(): Flow<List<TraceEntity>>

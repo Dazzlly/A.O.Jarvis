@@ -159,12 +159,16 @@ class AppSelfController(private val appContext: Context) {
         settings: JarvisSettings,
         isBackgroundRunning: Boolean,
         isScreenSharing: Boolean = false,
-        lastVisualSummary: String = ""
+        lastVisualSummary: String = "",
+        batteryStatus: BatteryStatusSnapshot? = null,
+        deviceSettings: DeviceSettingsSnapshot? = null
     ): String {
         val currentTab = _currentDestination.value
         val permsSummary = PermissionsManager.summarizePermissionsForPrompt(appContext)
+        val liveBattery = batteryStatus ?: BatteryStatusMonitor.readSnapshot(appContext)
+        val batterySummary = BatteryStatusMonitor.formatForAiPrompt(liveBattery, deviceSettings)
         return buildString {
-            append("\n\n[AUTOCONSCIÊNCIA, VISÃO DE TELA, CONTROLE DO DISPOSITIVO E AUTO-EVOLUÇÃO]\n")
+            append("\n\n[AUTOCONSCIÊNCIA, VISÃO DE TELA, BATERIA, CONTROLE DO DISPOSITIVO E AUTO-EVOLUÇÃO]\n")
             append("Você é o próprio aplicativo Android A.O.Jarvis. Conheça suas telas:\n")
             AppDestination.entries.forEach { dest ->
                 append("- Aba ${dest.key} (${dest.displayName}): ${dest.summary}.\n")
@@ -175,18 +179,20 @@ class AppSelfController(private val appContext: Context) {
             append("serviço background=${if (isBackgroundRunning) "ativo" else "inativo"}, ")
             append("compartilhamento de tela=${if (isScreenSharing) "ATIVO (você recebe capturas da tela do usuário no motor atual)" else "inativo"}, ")
             append("servidor LAN=${if (settings.lanTriggerEnabled) "habilitado na porta ${settings.lanTriggerPort}" else "desativado"}.\n")
+            append("$batterySummary\n")
             if (lastVisualSummary.isNotBlank()) {
                 append("Último contexto visual interpretado da tela: \"$lastVisualSummary\".\n")
             }
             append("$permsSummary.\n")
-            append("Quando o usuário pedir para navegar no app, alterar configurações do celular (brilho, volume, Wi-Fi, Bluetooth, lanterna, rotação, não perturbe, tempo de tela), compartilhar tela, evoluir o próprio código no GitHub ou abrir apps externos, responda em português e adicione ao final a tag correspondente (o sistema executa e oculta a tag):\n")
+            append("Quando o usuário pedir para navegar no app, alterar configurações do celular (brilho, volume, Wi-Fi, Bluetooth, lanterna, rotação, não perturbe, tempo de tela, economia de bateria), compartilhar tela, evoluir o próprio código no GitHub ou abrir apps externos, responda em português e adicione ao final a tag correspondente (o sistema executa e oculta a tag):\n")
             append("- [[ACTION:NAVIGATE:CONSOLE|ENGINES|TOOLS|TELEMETRY]] (navega para uma aba do app)\n")
             append("- [[ACTION:OPEN_MODE:GEMINI_LIVE|NATIVE]] (alterna entre Voz Nativa e Gemini Live)\n")
             append("- [[ACTION:SET_THEME:TRON|OBSIDIAN|LIGHT|CUSTOM]] (troca o tema do app entre Tron Legacy, Obsidian Pro, Claro ou Custom)\n")
             append("- [[ACTION:SET_ROUTING:AUTO|GEMINI|OLLAMA|OFFLINE]] (troca o motor de IA)\n")
             append("- [[ACTION:TOGGLE_BG:START|STOP]] (liga/desliga o serviço em segundo plano)\n")
-            append("- [[ACTION:DEVICE_CONTROL_SERVICE:START|STOP]] (liga/desliga o Foreground Service de controle de dispositivo)\n")
+            append("- [[ACTION:DEVICE_CONTROL_SERVICE:START|STOP]] (liga/desliga o Foreground Service de controle de dispositivo e monitor de bateria)\n")
             append("- [[ACTION:SCREEN_SHARE:START|STOP]] (inicia ou encerra o compartilhamento de tela para visão em tempo real)\n")
+            append("- [[ACTION:DEVICE_SETTING:power_save=on]] (aplica ações imediatas de economia de bateria: reduz brilho para 20%, desliga lanterna e abre painel de Economia de Bateria)\n")
             append("- [[ACTION:DEVICE_SETTING:brightness=80|up|down|auto|manual]] (ajusta o brilho da tela)\n")
             append("- [[ACTION:DEVICE_SETTING:volume=70|up|down|mute|max]] (ajusta o volume de mídia)\n")
             append("- [[ACTION:DEVICE_SETTING:wifi=on|off|toggle]] (liga/desliga ou abre painel rápido do Wi-Fi)\n")

@@ -473,12 +473,61 @@ class DeviceSettingsController(context: Context) {
     }
 
     /**
+     * Aplica ações imediatas de economia de bateria disponíveis sem root:
+     * reduz o brilho da tela para 20%, desliga a lanterna se acesa e abre o painel
+     * de Economia de Bateria do Android caso o modo ainda não esteja ativo.
+     */
+    fun applyPowerSavingActions(openBatteryPanelIfNeeded: Boolean = true): IntegrationResult {
+        val actionsTaken = mutableListOf<String>()
+        val snapshot = readSnapshot()
+
+        if (snapshot.isTorchOn) {
+            val torchRes = setTorchEnabled(false)
+            if (torchRes.success) actionsTaken.add("lanterna desligada")
+        }
+
+        if (canWriteSystemSettings()) {
+            if (snapshot.brightnessPercent > 25) {
+                val brightRes = setBrightnessPercent(20)
+                if (brightRes.success) actionsTaken.add("brilho reduzido para 20%")
+            }
+        } else {
+            actionsTaken.add("conceda 'Alterar Sistema' para reduzir brilho automaticamente")
+        }
+
+        val battery = BatteryStatusMonitor.readSnapshot(appContext)
+        if (openBatteryPanelIfNeeded && !battery.isPowerSaveMode) {
+            val panelRes = openSystemPanelOrSettings("bateria")
+            if (panelRes.success) actionsTaken.add("painel Economia de Bateria aberto")
+        }
+
+        val summary = if (actionsTaken.isEmpty()) {
+            "Perfil de economia de energia verificado (${battery.levelPercent}%)."
+        } else {
+            "Economia de energia aplicada: ${actionsTaken.joinToString(", ")}."
+        }
+        return IntegrationResult(
+            success = true,
+            message = summary,
+            toolName = "device:economia-bateria"
+        )
+    }
+
+    /**
      * Executor unificado para comandos de voz e tags [[ACTION:DEVICE_SETTING:chave=valor]].
      */
     fun executeSettingAction(spec: String): IntegrationResult {
         val key = spec.substringBefore("=").trim().lowercase()
         val value = spec.substringAfter("=", "").trim().lowercase()
         return when (key) {
+            "power_save", "battery_saver", "economia_bateria" -> {
+                if (value == "panel" || value == "open") {
+                    openSystemPanelOrSettings("bateria")
+                } else {
+                    applyPowerSavingActions(openBatteryPanelIfNeeded = value != "silent")
+                }
+            }
+
             "brightness", "brilho" -> when (value) {
                 "up", "mais", "+" -> adjustBrightness(20)
                 "down", "menos", "-" -> adjustBrightness(-20)

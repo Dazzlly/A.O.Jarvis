@@ -21,6 +21,7 @@ import com.example.cloud.JarvisCloudRepository
 import com.example.core.AppDestination
 import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
+import com.example.core.BatteryStatusMonitor
 import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.EvolutionProposal
@@ -42,6 +43,7 @@ import com.example.data.ConversationSessionEntity
 import com.example.data.DEFAULT_SESSION_ID
 import com.example.data.JarvisSettings
 import com.example.data.MemoryEntity
+import com.example.data.OfflineVoiceCommandEntity
 import com.example.data.RoutingMode
 import com.example.data.TraceEntity
 import com.example.data.VoiceCommandEntity
@@ -87,6 +89,7 @@ class OpenJarvisViewModel(
 
     private val coordinator = JarvisRuntimeCoordinator.getInstance(application.applicationContext)
     private val database = coordinator.database
+    private val offlineVoiceCommandRepository = coordinator.offlineVoiceCommandRepository
     private val settingsDataStore = coordinator.settingsDataStore
     private val orchestrator = coordinator.orchestrator
     private val networkEngineManager = coordinator.networkEngineManager
@@ -198,6 +201,7 @@ class OpenJarvisViewModel(
     init {
         viewModelScope.launch {
             conversationStateManager.ensureDefaultSessionExists()
+            offlineVoiceCommandRepository.ensureDefaultCommandsSeeded()
             Firebase.auth.currentUser?.let { user ->
                 cloudRepository.upsertUserProfile(user)
             }
@@ -235,6 +239,13 @@ class OpenJarvisViewModel(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+
+    val offlineVoiceCommands: StateFlow<List<OfflineVoiceCommandEntity>> =
+        offlineVoiceCommandRepository.observeCommands().stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     val traces: StateFlow<List<TraceEntity>> = database.traceDao().observeTraces().stateIn(
         scope = viewModelScope,
@@ -628,6 +639,32 @@ class OpenJarvisViewModel(
         cloudRepository.deleteVoiceCommand("cmd_$id")
     }
 
+    // Essential Offline Voice Commands (Local Room Table)
+    fun addOfflineVoiceCommand(
+        triggerPhrase: String,
+        aliases: String,
+        actionKey: String,
+        actionArgument: String,
+        description: String
+    ) = viewModelScope.launch {
+        if (triggerPhrase.isBlank() || actionKey.isBlank()) return@launch
+        offlineVoiceCommandRepository.addCommand(
+            triggerPhrase = triggerPhrase,
+            aliases = aliases,
+            actionKey = actionKey,
+            actionArgument = actionArgument,
+            description = description
+        )
+    }
+
+    fun toggleOfflineVoiceCommand(command: OfflineVoiceCommandEntity) = viewModelScope.launch {
+        offlineVoiceCommandRepository.toggleCommand(command)
+    }
+
+    fun deleteOfflineVoiceCommand(id: Long) = viewModelScope.launch {
+        offlineVoiceCommandRepository.deleteCommand(id)
+    }
+
     fun addMemory(key: String, content: String, category: String) = viewModelScope.launch {
         val cleanKey = key.trim()
         val cleanContent = content.trim()
@@ -888,8 +925,20 @@ class OpenJarvisViewModel(
 
     // Device Settings Control & Dedicated Foreground Service
     fun refreshDeviceSettings() {
-        coordinator.updateDeviceControlServiceState(snapshot = deviceSettingsController.readSnapshot())
+        coordinator.updateDeviceControlServiceState(
+            snapshot = deviceSettingsController.readSnapshot(),
+            batteryStatus = BatteryStatusMonitor.readSnapshot(getApplication())
+        )
     }
+
+    fun applyPowerSavingProfile(): IntegrationResult =
+        deviceSettingsController.applyPowerSavingActions(openBatteryPanelIfNeeded = true).also {
+            coordinator.updateDeviceControlServiceState(
+                snapshot = deviceSettingsController.readSnapshot(),
+                batteryStatus = BatteryStatusMonitor.readSnapshot(getApplication()),
+                lastActionMessage = it.message
+            )
+        }
 
     fun startDeviceControlService() {
         coordinator.startDeviceControlService(getApplication())

@@ -10,12 +10,16 @@ import com.example.core.AppDestination
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
 import com.example.core.AppUiCommand
+import com.example.core.BatteryStatusMonitor
+import com.example.core.BatteryStatusSnapshot
 import com.example.core.DeviceSettingsController
 import com.example.core.PermissionsManager
 import com.example.vision.ScreenVisionManager
 import com.example.data.AppThemeMode
 import com.example.data.MemoryDao
 import com.example.data.MemoryEntity
+import com.example.data.OfflineVoiceCommandEntity
+import com.example.data.OfflineVoiceCommandRepository
 import com.example.data.RoutingMode
 import com.example.data.SettingsDataStore
 import com.example.data.VoiceCommandDao
@@ -41,12 +45,14 @@ class OfflineCommandEngine(
     private val context: Context,
     private val memoryDao: MemoryDao,
     private val voiceCommandDao: VoiceCommandDao,
+    private val offlineVoiceCommandRepository: OfflineVoiceCommandRepository,
     private val settingsDataStore: SettingsDataStore,
     private val ollamaEngine: OllamaInferenceEngine,
     private val integrationManager: AppIntegrationManager,
     private val appSelfController: AppSelfController,
     private val deviceSettingsController: DeviceSettingsController,
-    private val screenVisionManager: ScreenVisionManager
+    private val screenVisionManager: ScreenVisionManager,
+    private val batteryStatusProvider: () -> BatteryStatusSnapshot = { BatteryStatusMonitor.readSnapshot(context) }
 ) {
 
     private fun normalize(text: String): String {
@@ -85,6 +91,13 @@ class OfflineCommandEngine(
                     else -> OfflineMatchResult.Handled(cmd.actionPayload, "comando:${cmd.triggerPhrase}")
                 }
             }
+        }
+
+        // 1B. Check essential offline voice commands stored in local Room table (offline_voice_commands)
+        val offlineRoomMatch = offlineVoiceCommandRepository.findBestMatch(clean)
+        if (offlineRoomMatch != null) {
+            offlineVoiceCommandRepository.recordUsage(offlineRoomMatch.id)
+            return executeOfflineRoomCommand(offlineRoomMatch)
         }
 
         // 2. Self-Navigation & Guided Self-Tour inside OpenJarvis
@@ -227,19 +240,18 @@ class OfflineCommandEngine(
             }
         }
 
-        // 8. Built-in Real System & Network Telemetry Diagnostics
-        if (clean.contains("status do sistema") || clean.contains("diagnostico") || clean.contains("bateria") || clean.contains("status jarvis")) {
-            val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-            val batteryPct = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-            val isCharging = batteryManager?.isCharging == true
+        // 8. Built-in Real System, Battery & Network Telemetry Diagnostics
+        if (clean.contains("status do sistema") || clean.contains("diagnostico") || clean.contains("bateria") || clean.contains("battery") || clean.contains("status jarvis")) {
+            val battery = batteryStatusProvider()
+            val settingsSnapshot = deviceSettingsController.readSnapshot()
             val netStatus = describeNetwork()
             val memoryCount = memoryDao.getAllMemories().size
             val commandCount = voiceCommandDao.getEnabledCommands().size
             val permsInfo = PermissionsManager.summarizePermissionsForPrompt(context)
-            val batteryText = if (batteryPct in 0..100) "$batteryPct% (${if (isCharging) "carregando" else "bateria"})" else "indisponível"
+            val batterySummary = BatteryStatusMonitor.buildPowerSavingRecommendation(battery, settingsSnapshot)
 
             return OfflineMatchResult.Handled(
-                responseText = "Diagnóstico OpenJarvis:\n• Energia: $batteryText\n• Rede: $netStatus\n• Memórias locais: $memoryCount\n• Comandos ativos: $commandCount\n• $permsInfo",
+                responseText = "Diagnóstico A.O.Jarvis:\n• Energia: $batterySummary\n• Rede: $netStatus\n• Memórias locais: $memoryCount\n• Comandos ativos: $commandCount\n• $permsInfo",
                 toolName = "offline:telemetria-sistema"
             )
         }
@@ -254,6 +266,29 @@ class OfflineCommandEngine(
         }
 
         return OfflineMatchResult.NotMatched
+    }
+
+    private fun executeOfflineRoomCommand(command: OfflineVoiceCommandEntity): OfflineMatchResult.Handled {
+        val result = when (command.actionKey.uppercase(Locale.US)) {
+            "TORCH_ON" -> deviceSettingsController.setTorchEnabled(true)
+            "TORCH_OFF" -> deviceSettingsController.setTorchEnabled(false)
+            "POWER_SAVE" -> deviceSettingsController.applyPowerSavingActions(openBatteryPanelIfNeeded = true)
+            "BATTERY_STATUS" -> {
+                val battery = batteryStatusProvider()
+                val snapshot = deviceSettingsController.readSnapshot()
+                com.example.core.IntegrationResult(
+                    success = true,
+                    message = BatteryStatusMonitor.buildPowerSavingRecommendation(battery, snapshot),
+                    toolName = "offline-room:bateria"
+                )
+            }
+            "DEVICE_SETTING" -> deviceSettingsController.executeSettingAction(command.actionArgument)
+            else -> deviceSettingsController.executeSettingAction(command.actionArgument.ifBlank { command.actionKey })
+        }
+        return OfflineMatchResult.Handled(
+            responseText = result.message,
+            toolName = "offline-room:${command.triggerPhrase}"
+        )
     }
 
     private suspend fun tryHandleSelfNavigation(clean: String, rawInput: String): OfflineMatchResult? {

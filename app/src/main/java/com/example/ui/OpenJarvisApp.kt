@@ -120,6 +120,7 @@ fun OpenJarvisApp(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val memories by viewModel.memories.collectAsStateWithLifecycle()
     val commands by viewModel.voiceCommands.collectAsStateWithLifecycle()
+    val offlineVoiceCommands by viewModel.offlineVoiceCommands.collectAsStateWithLifecycle()
     val traces by viewModel.traces.collectAsStateWithLifecycle()
     val streamingState by viewModel.streamingState.collectAsStateWithLifecycle()
     val assistantState by viewModel.assistantState.collectAsStateWithLifecycle()
@@ -583,6 +584,7 @@ fun OpenJarvisApp(
                                     voiceState = voiceState,
                                     liveVoiceState = liveVoiceState,
                                     screenShareState = screenShareState,
+                                    batteryStatus = deviceControlServiceState.batteryStatus,
                                     isTtsSpeaking = isTtsSpeaking,
                                     selectedMode = selectedConsoleMode,
                                     onSelectMode = { selectedConsoleMode = it },
@@ -713,6 +715,7 @@ fun OpenJarvisApp(
                                         }
                                     },
                                     onRefreshDeviceSettings = { viewModel.refreshDeviceSettings() },
+                                    onApplyPowerSaving = { viewModel.applyPowerSavingProfile() },
                                     onOpenWriteSettingsPermission = { viewModel.openWriteSettingsPermission() },
                                     onOpenDndPermission = { viewModel.openDndAccessPermission() },
                                     onSetDeviceBrightness = { viewModel.setDeviceBrightness(it) },
@@ -753,6 +756,7 @@ fun OpenJarvisApp(
 
                                 JarvisTab.TOOLS -> ToolsMemoryScreen(
                                     commands = commands,
+                                    offlineVoiceCommands = offlineVoiceCommands,
                                     memories = memories,
                                     selectedTabIndex = selectedToolsTab,
                                     onSelectTabIndex = { selectedToolsTab = it },
@@ -772,6 +776,11 @@ fun OpenJarvisApp(
                                     },
                                     onToggleCommand = { viewModel.toggleVoiceCommand(it) },
                                     onDeleteCommand = { viewModel.deleteVoiceCommand(it) },
+                                    onAddOfflineCommand = { trigger, aliases, actionKey, actionArg, desc ->
+                                        viewModel.addOfflineVoiceCommand(trigger, aliases, actionKey, actionArg, desc)
+                                    },
+                                    onToggleOfflineCommand = { viewModel.toggleOfflineVoiceCommand(it) },
+                                    onDeleteOfflineCommand = { viewModel.deleteOfflineVoiceCommand(it) },
                                     onRunCommandNow = { phrase ->
                                         viewModel.sendPrompt(phrase, sourceTag = "TOOL_TEST")
                                         currentTab = JarvisTab.CONSOLE

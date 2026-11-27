@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -33,7 +34,8 @@ private const val ACTION_VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION"
 data class DeviceControlServiceState(
     val isRunning: Boolean = false,
     val snapshot: DeviceSettingsSnapshot = DeviceSettingsSnapshot(),
-    val lastActionMessage: String = "Serviço pronto para comandos de voz de dispositivo",
+    val batteryStatus: BatteryStatusSnapshot = BatteryStatusSnapshot(),
+    val lastActionMessage: String = "Serviço pronto para comandos de voz de dispositivo e telemetria de bateria",
     val lastUpdatedAt: Long = 0L
 ) {
     val missingPermissionsList: List<String>
@@ -65,7 +67,15 @@ class DeviceControlForegroundService : Service() {
 
     private val hardwareStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            syncStateAndNotification()
+            val batteryIntent = if (intent?.action == Intent.ACTION_BATTERY_CHANGED) intent else null
+            val statusMessage = when (intent?.action) {
+                Intent.ACTION_BATTERY_LOW -> "Bateria baixa detectada — telemetria enviada ao motor de IA para economia."
+                Intent.ACTION_POWER_CONNECTED -> "Carregador conectado — telemetria de energia atualizada."
+                Intent.ACTION_POWER_DISCONNECTED -> "Carregador desconectado — monitorando consumo de bateria."
+                PowerManager.ACTION_POWER_SAVE_MODE_CHANGED -> "Estado da Economia de Bateria do Android atualizado."
+                else -> null
+            }
+            syncStateAndNotification(lastMessage = statusMessage, batteryIntent = batteryIntent)
         }
     }
 
@@ -116,7 +126,8 @@ class DeviceControlForegroundService : Service() {
 
     private fun ensureForegroundAndObservers() {
         val snapshot = coordinator.deviceSettingsController.readSnapshot()
-        val notification = buildNotification(snapshot)
+        val battery = BatteryStatusMonitor.readSnapshot(this)
+        val notification = buildNotification(snapshot, battery)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -144,6 +155,12 @@ class DeviceControlForegroundService : Service() {
                 addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                 addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
                 addAction(ACTION_VOLUME_CHANGED)
+                addAction(Intent.ACTION_BATTERY_CHANGED)
+                addAction(Intent.ACTION_BATTERY_LOW)
+                addAction(Intent.ACTION_BATTERY_OKAY)
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
+                addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
             }
             runCatching {
                 ContextCompat.registerReceiver(
@@ -157,18 +174,31 @@ class DeviceControlForegroundService : Service() {
         }
     }
 
-    private fun syncStateAndNotification(lastMessage: String? = null) {
+    private fun syncStateAndNotification(
+        lastMessage: String? = null,
+        batteryIntent: Intent? = null
+    ) {
         val snapshot = coordinator.deviceSettingsController.readSnapshot()
+        val battery = BatteryStatusMonitor.readSnapshot(this, batteryIntent)
+        val effectiveMessage = lastMessage ?: if (battery.needsPowerSaving) {
+            BatteryStatusMonitor.buildPowerSavingRecommendation(battery, snapshot)
+        } else {
+            null
+        }
         coordinator.updateDeviceControlServiceState(
             isRunning = true,
             snapshot = snapshot,
-            lastActionMessage = lastMessage
+            batteryStatus = battery,
+            lastActionMessage = effectiveMessage
         )
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, buildNotification(snapshot))
+        nm.notify(NOTIFICATION_ID, buildNotification(snapshot, battery))
     }
 
-    private fun buildNotification(snapshot: DeviceSettingsSnapshot): Notification {
+    private fun buildNotification(
+        snapshot: DeviceSettingsSnapshot,
+        battery: BatteryStatusSnapshot
+    ): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this,
             30,
@@ -178,22 +208,22 @@ class DeviceControlForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val brightnessUpIntent = PendingIntent.getService(
+        val powerSaveIntent = PendingIntent.getService(
             this,
             31,
             Intent(this, DeviceControlForegroundService::class.java).apply {
                 action = ACTION_EXECUTE_SETTING
-                putExtra(EXTRA_SETTING_SPEC, "brightness=up")
+                putExtra(EXTRA_SETTING_SPEC, "power_save=on")
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val volumeUpIntent = PendingIntent.getService(
+        val brightnessDownIntent = PendingIntent.getService(
             this,
             32,
             Intent(this, DeviceControlForegroundService::class.java).apply {
                 action = ACTION_EXECUTE_SETTING
-                putExtra(EXTRA_SETTING_SPEC, "volume=up")
+                putExtra(EXTRA_SETTING_SPEC, "brightness=down")
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -209,23 +239,34 @@ class DeviceControlForegroundService : Service() {
 
         val wifiLabel = if (snapshot.isWifiEnabled) "Wi-Fi ON" else "Wi-Fi OFF"
         val btLabel = if (snapshot.isBluetoothEnabled) "BT ON" else "BT OFF"
+        val batteryLabel = if (battery.isKnown) {
+            val suffix = if (battery.isCharging) "⚡" else if (battery.needsPowerSaving) "⚠" else ""
+            "Bat ${battery.levelPercent}%$suffix"
+        } else {
+            "Bat --"
+        }
+        val lowBatteryNotice = if (battery.needsPowerSaving) {
+            " · Economia recomendada"
+        } else {
+            ""
+        }
         val permNotice = if (!snapshot.canWriteSystemSettings) {
             " · Falta permissão de Brilho"
         } else {
             ""
         }
-        val summary = "Brilho ${snapshot.brightnessPercent}% · Vol ${snapshot.mediaVolumePercent}% · $wifiLabel · $btLabel$permNotice"
+        val summary = "$batteryLabel · Brilho ${snapshot.brightnessPercent}% · Vol ${snapshot.mediaVolumePercent}% · $wifiLabel · $btLabel$lowBatteryNotice$permNotice"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("A.O.Jarvis · Controle do Dispositivo")
+            .setContentTitle("A.O.Jarvis · Controle & Monitor de Bateria")
             .setContentText(summary)
             .setStyle(NotificationCompat.BigTextStyle().bigText(summary))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(openAppIntent)
-            .addAction(0, "Brilho +", brightnessUpIntent)
-            .addAction(0, "Vol +", volumeUpIntent)
+            .addAction(0, "Economizar", powerSaveIntent)
+            .addAction(0, "Brilho -", brightnessDownIntent)
             .addAction(0, "Parar", stopIntent)
             .build()
     }

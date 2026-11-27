@@ -15,7 +15,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.BatteryStd
 import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.rounded.FlashlightOn
@@ -47,9 +51,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.core.BatteryStatusMonitor
 import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.IntegrationResult
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
@@ -58,6 +64,7 @@ fun DeviceControlCard(
     serviceState: DeviceControlServiceState,
     onToggleService: () -> Unit,
     onRefreshSnapshot: () -> Unit,
+    onApplyPowerSaving: () -> IntegrationResult,
     onOpenWriteSettingsPermission: () -> IntegrationResult,
     onOpenDndPermission: () -> IntegrationResult,
     onSetBrightness: (Int) -> IntegrationResult,
@@ -169,6 +176,103 @@ fun DeviceControlCard(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )
+                    }
+                }
+            }
+
+            // Live Battery Status Monitor (Foreground Service -> AI Power-Saving Context)
+            val battery = serviceState.batteryStatus
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = when {
+                    battery.needsPowerSaving -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+                    battery.isCharging -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
+                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (battery.needsPowerSaving) {
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.65f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("battery_monitor_panel")
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                battery.isCharging -> Icons.Rounded.BatteryChargingFull
+                                battery.needsPowerSaving -> Icons.Rounded.BatteryAlert
+                                else -> Icons.Rounded.BatteryStd
+                            },
+                            contentDescription = null,
+                            tint = when {
+                                battery.needsPowerSaving -> MaterialTheme.colorScheme.error
+                                battery.isCharging -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.primary
+                            },
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            val levelTitle = if (battery.isKnown) {
+                                val tempPart = if (battery.temperatureCelsius > 0f) {
+                                    " · ${String.format(Locale.US, "%.1f", battery.temperatureCelsius)}°C"
+                                } else ""
+                                "Monitor de Bateria · ${battery.levelPercent}% (${battery.chargingSource}$tempPart)"
+                            } else {
+                                "Monitor de Bateria · Lendo telemetria…"
+                            }
+                            Text(
+                                text = levelTitle,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Text(
+                                text = BatteryStatusMonitor.buildPowerSavingRecommendation(battery, snapshot),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (battery.isPowerSaveMode) {
+                                "Economia do Android: ATIVA"
+                            } else {
+                                "Reportado ao motor de IA em tempo real"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val res = onApplyPowerSaving()
+                                Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.testTag("apply_power_saving_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Bolt,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Economizar")
+                        }
                     }
                 }
             }

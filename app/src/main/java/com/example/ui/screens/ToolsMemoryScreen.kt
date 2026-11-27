@@ -56,12 +56,14 @@ import com.example.R
 import com.example.core.EvolutionProposal
 import com.example.core.SelfEvolutionState
 import com.example.data.MemoryEntity
+import com.example.data.OfflineVoiceCommandEntity
 import com.example.data.VoiceCommandEntity
 import com.example.engine.OfflineCommandEngine
 
 @Composable
 fun ToolsMemoryScreen(
     commands: List<VoiceCommandEntity>,
+    offlineVoiceCommands: List<OfflineVoiceCommandEntity>,
     memories: List<MemoryEntity>,
     selectedTabIndex: Int,
     onSelectTabIndex: (Int) -> Unit,
@@ -79,12 +81,16 @@ fun ToolsMemoryScreen(
     onAddCommand: (String, String, String) -> Unit,
     onToggleCommand: (VoiceCommandEntity) -> Unit,
     onDeleteCommand: (Long) -> Unit,
+    onAddOfflineCommand: (String, String, String, String, String) -> Unit,
+    onToggleOfflineCommand: (OfflineVoiceCommandEntity) -> Unit,
+    onDeleteOfflineCommand: (Long) -> Unit,
     onRunCommandNow: (String) -> Unit,
     onAddMemory: (String, String, String) -> Unit,
     onDeleteMemory: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showAddCommandDialog by remember { mutableStateOf(false) }
+    var showAddOfflineCommandDialog by remember { mutableStateOf(false) }
     var showAddMemoryDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -189,6 +195,45 @@ fun ToolsMemoryScreen(
                             onTest = { onRunCommandNow(cmd.triggerPhrase) }
                         )
                     }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Comandos Offline Essenciais (Banco Room Local)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Executam lanterna, brilho, volume, Wi-Fi, Bluetooth e economia de bateria sem internet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(
+                            onClick = { showAddOfflineCommandDialog = true },
+                            modifier = Modifier.testTag("add_offline_room_command_button")
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text("Offline")
+                        }
+                    }
+                }
+
+                items(offlineVoiceCommands, key = { "offline_room_${it.id}" }) { offlineCmd ->
+                    OfflineRoomCommandCard(
+                        command = offlineCmd,
+                        onToggle = { onToggleOfflineCommand(offlineCmd) },
+                        onDelete = { onDeleteOfflineCommand(offlineCmd.id) },
+                        onTest = { onRunCommandNow(offlineCmd.triggerPhrase) }
+                    )
                 }
 
                 item {
@@ -329,6 +374,16 @@ fun ToolsMemoryScreen(
         )
     }
 
+    if (showAddOfflineCommandDialog) {
+        AddOfflineRoomCommandDialog(
+            onDismiss = { showAddOfflineCommandDialog = false },
+            onSave = { trigger, aliases, actionKey, actionArg, desc ->
+                onAddOfflineCommand(trigger, aliases, actionKey, actionArg, desc)
+                showAddOfflineCommandDialog = false
+            }
+        )
+    }
+
     if (showAddMemoryDialog) {
         AddMemoryDialog(
             onDismiss = { showAddMemoryDialog = false },
@@ -338,6 +393,182 @@ fun ToolsMemoryScreen(
             }
         )
     }
+}
+
+@Composable
+private fun OfflineRoomCommandCard(
+    command: OfflineVoiceCommandEntity,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+    onTest: () -> Unit
+) {
+    val actionLabel = when (command.actionKey) {
+        "TORCH_ON" -> "Lanterna ON"
+        "TORCH_OFF" -> "Lanterna OFF"
+        "POWER_SAVE" -> "Economia Bateria"
+        "BATTERY_STATUS" -> "Status Bateria"
+        else -> command.actionArgument.ifBlank { command.actionKey }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("offline_room_cmd_${command.id}")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "\"${command.triggerPhrase}\"",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = actionLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        if (command.usageCount > 0) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "${command.usageCount}x",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    if (command.description.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = command.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (command.aliases.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Sinônimos: ${command.aliases.replace("|", ", ")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Switch(checked = command.enabled, onCheckedChange = { onToggle() })
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onTest) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Executar")
+                }
+                TextButton(onClick = onDelete) {
+                    Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Remover")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddOfflineRoomCommandDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String, String) -> Unit
+) {
+    var trigger by remember { mutableStateOf("") }
+    var aliases by remember { mutableStateOf("") }
+    var selectedPreset by remember { mutableStateOf("TORCH_ON") }
+
+    val presets = listOf(
+        Triple("TORCH_ON", "on", "Ligar lanterna"),
+        Triple("TORCH_OFF", "off", "Desligar lanterna"),
+        Triple("POWER_SAVE", "on", "Economia de bateria"),
+        Triple("DEVICE_SETTING:brightness=down", "brightness=down", "Reduzir brilho"),
+        Triple("DEVICE_SETTING:volume=mute", "volume=mute", "Mutar volume"),
+        Triple("DEVICE_SETTING:wifi=toggle", "wifi=toggle", "Alternar Wi-Fi")
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Novo Comando Offline (Room)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = trigger,
+                    onValueChange = { trigger = it },
+                    label = { Text("Frase de voz principal") },
+                    placeholder = { Text("ex: luz de emergencia") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = aliases,
+                    onValueChange = { aliases = it },
+                    label = { Text("Sinônimos separados por |") },
+                    placeholder = { Text("ex: acender flash|emergency light") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Ação offline do dispositivo:",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    presets.chunked(2).forEach { rowPresets ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            rowPresets.forEach { (key, _, label) ->
+                                FilterChip(
+                                    selected = selectedPreset == key,
+                                    onClick = { selectedPreset = key },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val chosen = presets.firstOrNull { it.first == selectedPreset } ?: presets.first()
+                    val actionKey = chosen.first.substringBefore(":")
+                    val actionArg = chosen.second
+                    onSave(trigger, aliases, actionKey, actionArg, chosen.third)
+                },
+                enabled = trigger.isNotBlank()
+            ) {
+                Text("Salvar Offline")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
 }
 
 @Composable
