@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +63,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -75,10 +77,12 @@ import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
 import com.example.core.GuidedTourStep
 import com.example.core.PermissionsManager
+import com.example.data.AppThemeMode
 import com.example.ui.screens.ConsoleScreen
 import com.example.ui.screens.EnginesScreen
 import com.example.ui.screens.TelemetryScreen
 import com.example.ui.screens.ToolsMemoryScreen
+import com.example.ui.theme.JarvisThemeBackdrop
 import com.example.ui.theme.OpenJarvisTheme
 
 enum class JarvisTab(
@@ -299,6 +303,10 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                     viewModel.updateDarkTheme(command.enabled)
                 }
 
+                is AppUiCommand.SetThemeMode -> {
+                    viewModel.updateThemeMode(command.mode)
+                }
+
                 is AppUiCommand.SetRoutingMode -> {
                     viewModel.updateRoutingMode(command.mode)
                 }
@@ -357,38 +365,52 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
         }
     }
 
-    OpenJarvisTheme(darkTheme = settings.darkTheme) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val useRail = maxWidth >= 600.dp
+    OpenJarvisTheme(
+        themeMode = settings.themeMode,
+        customAccentArgb = settings.customAccentColor
+    ) {
+        JarvisThemeBackdrop(themeMode = settings.themeMode) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val useRail = maxWidth >= 600.dp
 
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                contentWindowInsets = WindowInsets.safeDrawing,
-                bottomBar = {
-                    if (!useRail) {
-                        NavigationBar(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 4.dp
-                        ) {
-                            JarvisTab.entries.forEach { tab ->
-                                val selected = currentTab == tab
-                                NavigationBarItem(
-                                    selected = selected,
-                                    onClick = { currentTab = tab },
-                                    icon = {
-                                        Icon(
-                                            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                            contentDescription = stringResource(tab.labelRes)
-                                        )
-                                    },
-                                    label = { Text(stringResource(tab.labelRes)) },
-                                    modifier = Modifier.testTag(tab.testTag)
+                Scaffold(
+                    containerColor = Color.Transparent,
+                    contentWindowInsets = WindowInsets.safeDrawing,
+                    bottomBar = {
+                        if (!useRail) {
+                            Column {
+                                HorizontalDivider(
+                                    thickness = 1.dp,
+                                    color = if (settings.themeMode == AppThemeMode.TRON || settings.themeMode == AppThemeMode.CUSTOM) {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    }
                                 )
+                                NavigationBar(
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                                    tonalElevation = 4.dp
+                                ) {
+                                    JarvisTab.entries.forEach { tab ->
+                                        val selected = currentTab == tab
+                                        NavigationBarItem(
+                                            selected = selected,
+                                            onClick = { currentTab = tab },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                                    contentDescription = stringResource(tab.labelRes)
+                                                )
+                                            },
+                                            label = { Text(stringResource(tab.labelRes)) },
+                                            modifier = Modifier.testTag(tab.testTag)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            ) { innerPadding ->
+                ) { innerPadding ->
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -607,7 +629,8 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                     onToggleDeviceAutoRotate = { viewModel.toggleDeviceAutoRotate(it) },
                                     onToggleDeviceDnd = { viewModel.toggleDeviceDnd(it) },
                                     onOpenDevicePanel = { viewModel.openDeviceSystemPanel(it) },
-                                    onUpdateDarkTheme = { viewModel.updateDarkTheme(it) }
+                                    onUpdateThemeMode = { viewModel.updateThemeMode(it) },
+                                    onUpdateCustomAccentColor = { viewModel.updateCustomAccentColor(it) }
                                 )
 
                                 JarvisTab.TOOLS -> ToolsMemoryScreen(
@@ -650,6 +673,7 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                     }
                 }
             }
+        }
         }
     }
 }

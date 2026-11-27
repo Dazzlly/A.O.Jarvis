@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "OpenJarvis"
+rootProject.name = "A.O.Jarvis"
 
 include(":app")

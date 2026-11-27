@@ -664,8 +664,14 @@ private fun JarvisHeroHeader(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.tron_data_disc_transparent),
+                            contentDescription = stringResource(R.string.app_name),
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.size(38.dp)
+                        )
                         Text(
-                            text = "OpenJarvis",
+                            text = "A.O.Jarvis",
                             style = MaterialTheme.typography.headlineSmall,
                             color = Color(0xFFECF2F8)
                         )
@@ -779,7 +785,7 @@ private fun LiveNativeVoiceStrip(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isTtsSpeaking) "OpenJarvis falando (TTS)…" else voiceState.statusText,
+                        text = if (isTtsSpeaking) "A.O.Jarvis falando (TTS)…" else voiceState.statusText,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -868,7 +874,7 @@ private fun EmptyConsolePlaceholder(
         }
         Spacer(modifier = Modifier.height(14.dp))
         Text(
-            text = "OpenJarvis Pronto",
+            text = "A.O.Jarvis Pronto",
             style = MaterialTheme.typography.headlineSmall
         )
         Spacer(modifier = Modifier.height(6.dp))
@@ -1184,7 +1190,7 @@ private fun StreamingBubbleItem(state: StreamingUiState.Streaming) {
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = state.text.ifBlank { "Roteando solicitação no OpenJarvis…" },
+                text = state.text.ifBlank { "Roteando solicitação no A.O.Jarvis…" },
                 style = MaterialTheme.typography.bodyLarge
             )
         }

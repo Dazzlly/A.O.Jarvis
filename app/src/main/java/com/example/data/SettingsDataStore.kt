@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -36,6 +37,35 @@ enum class RoutingMode(val label: String, val description: String) {
     )
 }
 
+enum class AppThemeMode(
+    val label: String,
+    val subtitle: String,
+    val isDark: Boolean
+) {
+    TRON(
+        label = "Tron Legacy",
+        subtitle = "Grade neon ciano elétrico #00F0FF, preto abissal e energia âmbar",
+        isDark = true
+    ),
+    OBSIDIAN(
+        label = "Obsidian Pro",
+        subtitle = "Vidro vulcânico OLED com camadas de grafite, ametista e ouro escovado",
+        isDark = true
+    ),
+    DAYLIGHT(
+        label = "Claro",
+        subtitle = "Telemetria diurna limpa e de alto contraste para ambientes claros",
+        isDark = false
+    ),
+    CUSTOM(
+        label = "Custom",
+        subtitle = "Tema escuro fixo com apenas a cor de destaque personalizável",
+        isDark = true
+    )
+}
+
+const val DEFAULT_CUSTOM_ACCENT_COLOR: Long = 0xFF00C8FFL
+
 data class JarvisSettings(
     val routingMode: RoutingMode = RoutingMode.AUTO,
     val geminiModel: String = "gemini-3.8-flash",
@@ -56,6 +86,8 @@ data class JarvisSettings(
     val githubRepo: String = "",
     val fdroidRepoUrl: String = "",
     val autoCheckUpdates: Boolean = true,
+    val themeMode: AppThemeMode = AppThemeMode.TRON,
+    val customAccentColor: Long = DEFAULT_CUSTOM_ACCENT_COLOR,
     val darkTheme: Boolean = true
 )
 
@@ -82,11 +114,20 @@ class SettingsDataStore(private val context: Context) {
         val FDROID_REPO_URL = stringPreferencesKey("fdroid_repo_url")
         val AUTO_CHECK_UPDATES = booleanPreferencesKey("auto_check_updates")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val CUSTOM_ACCENT_COLOR = longPreferencesKey("custom_accent_color")
     }
 
     val settingsFlow: Flow<JarvisSettings> = context.jarvisDataStore.data.map { prefs ->
         val modeName = prefs[Keys.ROUTING_MODE] ?: RoutingMode.AUTO.name
         val routingMode = runCatching { RoutingMode.valueOf(modeName) }.getOrDefault(RoutingMode.AUTO)
+        val savedThemeName = prefs[Keys.THEME_MODE]
+        val legacyDark = prefs[Keys.DARK_THEME] ?: true
+        val resolvedThemeMode = if (savedThemeName != null) {
+            runCatching { AppThemeMode.valueOf(savedThemeName) }.getOrDefault(AppThemeMode.TRON)
+        } else {
+            if (legacyDark) AppThemeMode.TRON else AppThemeMode.DAYLIGHT
+        }
 
         JarvisSettings(
             routingMode = routingMode,
@@ -96,7 +137,7 @@ class SettingsDataStore(private val context: Context) {
             ollamaModel = prefs[Keys.OLLAMA_MODEL] ?: "llama3.2",
             temperature = prefs[Keys.TEMPERATURE] ?: 0.6f,
             systemPrompt = prefs[Keys.SYSTEM_PROMPT]
-                ?: "Você é o OpenJarvis, um assistente pessoal de IA local-first e inteligente rodando no Android. Seja preciso, claro e objetivo em português do Brasil, otimizado tanto para leitura quanto para resposta falada por voz.",
+                ?: "Você é o A.O.Jarvis, um assistente pessoal de IA local-first e inteligente rodando no Android. Seja preciso, claro e objetivo em português do Brasil, otimizado tanto para leitura quanto para resposta falada por voz.",
             wakeWordEnabled = prefs[Keys.WAKE_WORD_ENABLED] ?: true,
             wakeWord = prefs[Keys.WAKE_WORD] ?: "jarvis",
             preferOfflineStt = prefs[Keys.PREFER_OFFLINE_STT] ?: false,
@@ -109,7 +150,9 @@ class SettingsDataStore(private val context: Context) {
             githubRepo = prefs[Keys.GITHUB_REPO] ?: "",
             fdroidRepoUrl = prefs[Keys.FDROID_REPO_URL] ?: "",
             autoCheckUpdates = prefs[Keys.AUTO_CHECK_UPDATES] ?: true,
-            darkTheme = prefs[Keys.DARK_THEME] ?: true
+            themeMode = resolvedThemeMode,
+            customAccentColor = prefs[Keys.CUSTOM_ACCENT_COLOR] ?: DEFAULT_CUSTOM_ACCENT_COLOR,
+            darkTheme = resolvedThemeMode.isDark
         )
     }
 
@@ -199,8 +242,21 @@ class SettingsDataStore(private val context: Context) {
         }
     }
 
+    suspend fun updateThemeMode(mode: AppThemeMode) {
+        context.jarvisDataStore.edit {
+            it[Keys.THEME_MODE] = mode.name
+            it[Keys.DARK_THEME] = mode.isDark
+        }
+    }
+
+    suspend fun updateCustomAccentColor(argb: Long) {
+        context.jarvisDataStore.edit {
+            it[Keys.CUSTOM_ACCENT_COLOR] = argb
+        }
+    }
+
     suspend fun updateDarkTheme(enabled: Boolean) {
-        context.jarvisDataStore.edit { it[Keys.DARK_THEME] = enabled }
+        updateThemeMode(if (enabled) AppThemeMode.OBSIDIAN else AppThemeMode.DAYLIGHT)
     }
 
     private fun generateSecureToken(): String {

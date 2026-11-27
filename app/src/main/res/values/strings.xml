@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">OpenJarvis</string>
+    <string name="app_name">A.O.Jarvis</string>
     <string name="nav_console">Console</string>
     <string name="nav_engines">Motores</string>
     <string name="nav_tools">Comandos</string>
@@ -9,20 +9,20 @@
     <string name="mode_gemini_live">Gemini Live</string>
     <string name="permission_mic_required">Conceda acesso ao microfone para comandos por voz, Gemini Live e escuta em segundo plano.</string>
     <string name="permission_grant">Permitir</string>
-    <string name="input_placeholder">Pergunte ou fale um comando ao OpenJarvis…</string>
+    <string name="input_placeholder">Pergunte ou fale um comando ao A.O.Jarvis…</string>
 
     <string name="cd_stop_listening">Parar escuta de voz</string>
     <string name="cd_mic_listen">Falar comando usando Speech-to-Text nativo</string>
     <string name="cd_send_message">Enviar mensagem</string>
-    <string name="cd_jarvis_banner">Arte de telemetria neural do OpenJarvis</string>
+    <string name="cd_jarvis_banner">Arte de telemetria neural do A.O.Jarvis</string>
     <string name="cd_toggle_background">Alternar escuta contínua em segundo plano</string>
     <string name="cd_clear_chat">Limpar histórico do chat</string>
 
     <string name="bg_mode_on">BG Ativo</string>
     <string name="bg_mode_off">BG Off</string>
-    <string name="bg_channel_name">OpenJarvis Voz Contínua</string>
+    <string name="bg_channel_name">A.O.Jarvis Voz Contínua</string>
     <string name="bg_channel_desc">Mantém o reconhecimento de fala nativo ativo em segundo plano para interações contínuas, Ollama local e comandos offline.</string>
-    <string name="bg_notif_title">OpenJarvis em segundo plano</string>
+    <string name="bg_notif_title">A.O.Jarvis em segundo plano</string>
     <string name="bg_action_pause">Pausar</string>
     <string name="bg_action_resume">Retomar</string>
     <string name="bg_action_stop">Encerrar</string>
@@ -30,7 +30,7 @@
     <string name="live_title">Gemini Live em Tempo Real</string>
     <string name="live_connecting">Conectando ao Gemini 3.8 Live…</string>
     <string name="live_active">Conversa ao vivo conectada — pode falar</string>
-    <string name="live_subtitle">Áudio bidirecional de baixa latência usando Firebase AI Logic (gemini-3.8-live) com sua memória local do OpenJarvis.</string>
+    <string name="live_subtitle">Áudio bidirecional de baixa latência usando Firebase AI Logic (gemini-3.8-live) com sua memória local do A.O.Jarvis.</string>
     <string name="live_start">Iniciar Conversa Live</string>
     <string name="live_stop">Encerrar Sessão Live</string>
 
@@ -60,6 +60,6 @@
     <string name="cd_dismiss_update_banner">Fechar aviso de atualização</string>
     <string name="cd_copy_fdroid_url">Copiar URL do repositório F-Droid</string>
     <string name="tools_tab_autodev">Auto-Dev</string>
-    <string name="cd_share_screen">Compartilhar tela com o OpenJarvis</string>
+    <string name="cd_share_screen">Compartilhar tela com o A.O.Jarvis</string>
     <string name="cd_pick_screenshot">Selecionar captura ou imagem para análise visual</string>
 </resources>

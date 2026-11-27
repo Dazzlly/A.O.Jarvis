@@ -13,6 +13,7 @@ import com.example.core.AppUiCommand
 import com.example.core.DeviceSettingsController
 import com.example.core.PermissionsManager
 import com.example.vision.ScreenVisionManager
+import com.example.data.AppThemeMode
 import com.example.data.MemoryDao
 import com.example.data.MemoryEntity
 import com.example.data.RoutingMode
@@ -340,18 +341,34 @@ class OfflineCommandEngine(
             )
         }
 
-        if (clean.contains("tema claro") || clean.contains("modo claro")) {
-            settingsDataStore.updateDarkTheme(false)
+        if (clean.contains("tema tron") || clean.contains("modo tron") || clean.contains("estilo tron")) {
+            settingsDataStore.updateThemeMode(AppThemeMode.TRON)
             return OfflineMatchResult.Handled(
-                responseText = "Tema claro ativado no OpenJarvis.",
+                responseText = "Tema Tron Legacy ativado no A.O.Jarvis.",
                 toolName = "jarvis:auto-controle"
             )
         }
 
-        if (clean.contains("tema escuro") || clean.contains("modo escuro")) {
-            settingsDataStore.updateDarkTheme(true)
+        if (clean.contains("tema custom") || clean.contains("modo custom") || clean.contains("tema personalizado")) {
+            settingsDataStore.updateThemeMode(AppThemeMode.CUSTOM)
             return OfflineMatchResult.Handled(
-                responseText = "Tema escuro Obsidian ativado no OpenJarvis.",
+                responseText = "Tema Custom ativado no A.O.Jarvis. Você pode escolher sua cor em Motores.",
+                toolName = "jarvis:auto-controle"
+            )
+        }
+
+        if (clean.contains("tema claro") || clean.contains("modo claro")) {
+            settingsDataStore.updateThemeMode(AppThemeMode.DAYLIGHT)
+            return OfflineMatchResult.Handled(
+                responseText = "Tema claro ativado no A.O.Jarvis.",
+                toolName = "jarvis:auto-controle"
+            )
+        }
+
+        if (clean.contains("tema obsidian") || clean.contains("modo obsidian") || clean.contains("tema escuro") || clean.contains("modo escuro")) {
+            settingsDataStore.updateThemeMode(AppThemeMode.OBSIDIAN)
+            return OfflineMatchResult.Handled(
+                responseText = "Tema Obsidian Pro ativado no A.O.Jarvis.",
                 toolName = "jarvis:auto-controle"
             )
         }

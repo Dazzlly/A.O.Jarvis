@@ -79,10 +79,12 @@ import com.example.core.AutonomyPermissionItem
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.FdroidRepoCheckState
 import com.example.core.IntegrationResult
+import com.example.data.AppThemeMode
 import com.example.data.JarvisSettings
 import com.example.data.RoutingMode
 import com.example.engine.NetworkEngineState
 import com.example.engine.OllamaHealthStatus
+import com.example.ui.theme.LocalAppThemeMode
 import com.example.voice.LanServerState
 import com.example.voice.TtsStatus
 import java.util.Locale
@@ -171,7 +173,8 @@ fun EnginesScreen(
     onToggleDeviceAutoRotate: (Boolean) -> IntegrationResult,
     onToggleDeviceDnd: (Boolean) -> IntegrationResult,
     onOpenDevicePanel: (String) -> IntegrationResult,
-    onUpdateDarkTheme: (Boolean) -> Unit,
+    onUpdateThemeMode: (AppThemeMode) -> Unit,
+    onUpdateCustomAccentColor: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1074,21 +1077,14 @@ fun EnginesScreen(
             )
         }
 
-        // 5. Appearance
+        // 5. Appearance & Themes (Tron Legacy, Obsidian Pro, Daylight, Custom)
         item {
-            SectionCard(
-                title = "Aparência",
-                subtitle = "Tema escuro Obsidian Telemetry ou modo claro",
-                icon = Icons.Rounded.Tune
-            ) {
-                TogglePreferenceRow(
-                    title = "Tema Escuro Obsidian",
-                    subtitle = "Alto contraste otimizado para console de telemetria",
-                    checked = settings.darkTheme,
-                    onCheckedChange = onUpdateDarkTheme,
-                    testTag = "switch_dark_theme"
-                )
-            }
+            ThemeSelectorCard(
+                selectedTheme = settings.themeMode,
+                customAccentColor = settings.customAccentColor,
+                onSelectTheme = onUpdateThemeMode,
+                onSelectCustomAccentColor = onUpdateCustomAccentColor
+            )
         }
     }
 }
@@ -1100,10 +1096,18 @@ private fun SectionCard(
     icon: ImageVector,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val activeTheme = LocalAppThemeMode.current
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (activeTheme == AppThemeMode.TRON) {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant
+            }
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

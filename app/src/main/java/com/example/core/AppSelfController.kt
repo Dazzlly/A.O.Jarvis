@@ -1,6 +1,7 @@
 package com.example.core
 
 import android.content.Context
+import com.example.data.AppThemeMode
 import com.example.data.JarvisSettings
 import com.example.data.RoutingMode
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -53,6 +54,7 @@ sealed interface AppUiCommand {
     data class NavigateTo(val destination: AppDestination, val reason: String? = null) : AppUiCommand
     data class SetConsoleMode(val geminiLive: Boolean) : AppUiCommand
     data class SetDarkTheme(val enabled: Boolean) : AppUiCommand
+    data class SetThemeMode(val mode: AppThemeMode) : AppUiCommand
     data class SetRoutingMode(val mode: RoutingMode) : AppUiCommand
     data class ToggleBackgroundService(val shouldRun: Boolean) : AppUiCommand
     data object RequestAllPermissions : AppUiCommand
@@ -161,13 +163,13 @@ class AppSelfController(private val appContext: Context) {
         val permsSummary = PermissionsManager.summarizePermissionsForPrompt(appContext)
         return buildString {
             append("\n\n[AUTOCONSCIÊNCIA, VISÃO DE TELA, CONTROLE DO DISPOSITIVO E AUTO-EVOLUÇÃO]\n")
-            append("Você é o próprio aplicativo Android OpenJarvis. Conheça suas telas:\n")
+            append("Você é o próprio aplicativo Android A.O.Jarvis. Conheça suas telas:\n")
             AppDestination.entries.forEach { dest ->
                 append("- Aba ${dest.key} (${dest.displayName}): ${dest.summary}.\n")
             }
             append("Estado atual do app: aba ativa=${currentTab.displayName}, modo de roteamento=${settings.routingMode.label}, ")
             append("TTS automático=${if (settings.autoSpeakResponses) "ativado" else "desativado"}, ")
-            append("tema=${if (settings.darkTheme) "escuro" else "claro"}, ")
+            append("tema=${settings.themeMode.label}, ")
             append("serviço background=${if (isBackgroundRunning) "ativo" else "inativo"}, ")
             append("compartilhamento de tela=${if (isScreenSharing) "ATIVO (você recebe quadros da tela do usuário)" else "inativo"}, ")
             append("servidor LAN=${if (settings.lanTriggerEnabled) "habilitado na porta ${settings.lanTriggerPort}" else "desativado"}.\n")
@@ -175,7 +177,7 @@ class AppSelfController(private val appContext: Context) {
             append("Quando o usuário pedir para navegar no app, alterar configurações do celular (brilho, volume, lanterna, rotação, não perturbe, tempo de tela, painéis Wi-Fi/Bluetooth), compartilhar tela, evoluir o próprio código no GitHub ou abrir apps externos, responda em português e adicione ao final a tag correspondente (o sistema executa e oculta a tag):\n")
             append("- [[ACTION:NAVIGATE:CONSOLE|ENGINES|TOOLS|TELEMETRY]] (navega para uma aba do app)\n")
             append("- [[ACTION:OPEN_MODE:GEMINI_LIVE|NATIVE]] (alterna entre Voz Nativa e Gemini Live)\n")
-            append("- [[ACTION:SET_THEME:DARK|LIGHT]] (troca o tema do app)\n")
+            append("- [[ACTION:SET_THEME:TRON|OBSIDIAN|LIGHT|CUSTOM]] (troca o tema do app entre Tron Legacy, Obsidian Pro, Claro ou Custom)\n")
             append("- [[ACTION:SET_ROUTING:AUTO|GEMINI|OLLAMA|OFFLINE]] (troca o motor de IA)\n")
             append("- [[ACTION:TOGGLE_BG:START|STOP]] (liga/desliga o serviço em segundo plano)\n")
             append("- [[ACTION:SCREEN_SHARE:START|STOP]] (inicia ou encerra o compartilhamento de tela para visão em tempo real)\n")
@@ -243,9 +245,15 @@ class AppSelfController(private val appContext: Context) {
                 }
 
                 "SET_THEME" -> {
-                    val dark = !arg.equals("LIGHT", ignoreCase = true)
-                    emitCommand(AppUiCommand.SetDarkTheme(dark))
-                    executedNotes.add(if (dark) "Tema escuro ativado" else "Tema claro ativado")
+                    val mode = when (arg.uppercase()) {
+                        "TRON" -> AppThemeMode.TRON
+                        "LIGHT", "CLARO", "DAYLIGHT" -> AppThemeMode.DAYLIGHT
+                        "CUSTOM", "PERSONALIZADO" -> AppThemeMode.CUSTOM
+                        "OBSIDIAN", "DARK", "ESCURO" -> AppThemeMode.OBSIDIAN
+                        else -> AppThemeMode.TRON
+                    }
+                    emitCommand(AppUiCommand.SetThemeMode(mode))
+                    executedNotes.add("Tema ${mode.label} ativado")
                 }
 
                 "SET_ROUTING" -> {

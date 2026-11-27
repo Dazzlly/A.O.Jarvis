@@ -247,7 +247,7 @@ class ScreenShareService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("OpenJarvis visualizando sua tela")
+            .setContentTitle("A.O.Jarvis visualizando sua tela")
             .setContentText("Compartilhamento de tela ativo. Pergunte ao Jarvis sobre o que está na tela.")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -261,10 +261,10 @@ class ScreenShareService : Service() {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "OpenJarvis Visão de Tela",
+                "A.O.Jarvis Visão de Tela",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Indica quando o OpenJarvis está recebendo quadros da sua tela para análise visual."
+                description = "Indica quando o A.O.Jarvis está recebendo quadros da sua tela para análise visual."
             }
             nm.createNotificationChannel(channel)
         }

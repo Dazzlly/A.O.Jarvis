@@ -1,28 +1,80 @@
 package com.example.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
+import android.app.Activity
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import com.example.data.AppThemeMode
+import com.example.data.DEFAULT_CUSTOM_ACCENT_COLOR
 
-private val OpenJarvisDarkColorScheme = darkColorScheme(
-    primary = ArcCyan,
-    onPrimary = OnArcCyan,
-    primaryContainer = ArcCyanContainer,
-    onPrimaryContainer = ArcCyanBright,
-    secondary = TelemetryAmber,
-    onSecondary = OnTelemetryAmber,
-    secondaryContainer = TelemetryAmberContainer,
-    onSecondaryContainer = Color(0xFFFDE68A),
-    tertiary = SignalEmerald,
-    onTertiary = Color(0xFF002116),
-    tertiaryContainer = SignalEmeraldContainer,
-    onTertiaryContainer = Color(0xFFA7F3D0),
+val LocalAppThemeMode = staticCompositionLocalOf { AppThemeMode.TRON }
+
+private val TronLegacyColorScheme = darkColorScheme(
+    primary = TronNeonCyan,
+    onPrimary = OnTronNeonCyan,
+    primaryContainer = TronNeonCyanContainer,
+    onPrimaryContainer = TronNeonCyanBright,
+    secondary = TronCluOrange,
+    onSecondary = OnTronCluOrange,
+    secondaryContainer = TronCluOrangeContainer,
+    onSecondaryContainer = TronCluOrangeBright,
+    tertiary = TronGridMint,
+    onTertiary = OnTronGridMint,
+    tertiaryContainer = TronGridMintContainer,
+    onTertiaryContainer = TronGridMintBright,
+    error = TronRecognizerRed,
+    onError = Color.White,
+    errorContainer = TronRecognizerRedContainer,
+    onErrorContainer = TronRecognizerRedBright,
+    background = TronAbyss,
+    onBackground = TronInkPrimary,
+    surface = TronPanel,
+    onSurface = TronInkPrimary,
+    surfaceVariant = TronPanelHigh,
+    onSurfaceVariant = TronInkSecondary,
+    surfaceContainerLowest = TronAbyss,
+    surfaceContainerLow = TronPanel,
+    surfaceContainer = TronPanelHigh,
+    surfaceContainerHigh = TronPanelHighest,
+    outline = TronOutline,
+    outlineVariant = TronOutlineSubtle
+)
+
+private val ObsidianProColorScheme = darkColorScheme(
+    primary = ObsidianAmethyst,
+    onPrimary = OnObsidianAmethyst,
+    primaryContainer = ObsidianAmethystContainer,
+    onPrimaryContainer = ObsidianAmethystBright,
+    secondary = ObsidianGold,
+    onSecondary = OnObsidianGold,
+    secondaryContainer = ObsidianGoldContainer,
+    onSecondaryContainer = ObsidianGoldBright,
+    tertiary = ObsidianEmerald,
+    onTertiary = OnObsidianEmerald,
+    tertiaryContainer = ObsidianEmeraldContainer,
+    onTertiaryContainer = ObsidianEmeraldBright,
     error = PulseCrimson,
     onError = Color.White,
     errorContainer = PulseCrimsonContainer,
@@ -38,10 +90,10 @@ private val OpenJarvisDarkColorScheme = darkColorScheme(
     surfaceContainer = ObsidianSurfaceHigh,
     surfaceContainerHigh = ObsidianSurfaceHighest,
     outline = ObsidianBorder,
-    outlineVariant = Color(0xFF1D293B)
+    outlineVariant = ObsidianBorderSubtle
 )
 
-private val OpenJarvisLightColorScheme = lightColorScheme(
+private val DaylightColorScheme = lightColorScheme(
     primary = DaylightCyan,
     onPrimary = Color.White,
     primaryContainer = DaylightCyanContainer,
@@ -72,27 +124,251 @@ private val OpenJarvisLightColorScheme = lightColorScheme(
     outlineVariant = Color(0xFFDCE6F0)
 )
 
+/**
+ * Tema Custom: base escura fixa de alto contraste, personalizando exclusivamente
+ * a cor de destaque (primary, containers, bordas e brilho ambiente) a partir da cor escolhida.
+ */
+fun buildCustomColorScheme(accentArgb: Long): ColorScheme {
+    val accent = Color(accentArgb.toInt())
+    val baseVoid = Color(0xFF07090D)
+    val baseSurface = Color(0xFF10131A)
+    val baseSurfaceHigh = Color(0xFF171B24)
+    val baseSurfaceHighest = Color(0xFF202532)
+    val onAccent = if (accent.luminance() > 0.42f) Color(0xFF060A10) else Color.White
+    val accentContainer = lerp(baseSurface, accent, 0.24f)
+    val onAccentContainer = lerp(Color.White, accent, 0.30f)
+    val secondaryAccent = lerp(accent, Color.White, 0.18f)
+    val secondaryContainer = lerp(baseSurface, accent, 0.16f)
+    val outline = lerp(Color(0xFF2C3240), accent, 0.45f)
+    val outlineVariant = lerp(Color(0xFF1C202B), accent, 0.18f)
+
+    return darkColorScheme(
+        primary = accent,
+        onPrimary = onAccent,
+        primaryContainer = accentContainer,
+        onPrimaryContainer = onAccentContainer,
+        secondary = secondaryAccent,
+        onSecondary = onAccent,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = onAccentContainer,
+        tertiary = ObsidianEmerald,
+        onTertiary = OnObsidianEmerald,
+        tertiaryContainer = ObsidianEmeraldContainer,
+        onTertiaryContainer = ObsidianEmeraldBright,
+        error = PulseCrimson,
+        onError = Color.White,
+        errorContainer = PulseCrimsonContainer,
+        onErrorContainer = Color(0xFFFECDD3),
+        background = baseVoid,
+        onBackground = InkLightPrimary,
+        surface = baseSurface,
+        onSurface = InkLightPrimary,
+        surfaceVariant = baseSurfaceHigh,
+        onSurfaceVariant = InkLightSecondary,
+        surfaceContainerLowest = baseVoid,
+        surfaceContainerLow = baseSurface,
+        surfaceContainer = baseSurfaceHigh,
+        surfaceContainerHigh = baseSurfaceHighest,
+        outline = outline,
+        outlineVariant = outlineVariant
+    )
+}
+
+// Precision angular geometry for Tron Legacy
+val TronShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(10.dp),
+    large = RoundedCornerShape(14.dp),
+    extraLarge = RoundedCornerShape(20.dp)
+)
+
+// Sculpted obsidian-glass geometry for Obsidian Pro, Daylight & Custom
 val OpenJarvisShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
-    extraLarge = RoundedCornerShape(28.dp)
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(30.dp)
 )
 
 @Composable
 fun OpenJarvisTheme(
-    darkTheme: Boolean = true,
-    followSystemTheme: Boolean = false,
+    themeMode: AppThemeMode = AppThemeMode.TRON,
+    customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_COLOR,
     content: @Composable () -> Unit
 ) {
-    val useDark = if (followSystemTheme) isSystemInDarkTheme() else darkTheme
-    val colorScheme = if (useDark) OpenJarvisDarkColorScheme else OpenJarvisLightColorScheme
+    val customColorScheme = remember(customAccentArgb) {
+        buildCustomColorScheme(customAccentArgb)
+    }
+    val colorScheme = when (themeMode) {
+        AppThemeMode.TRON -> TronLegacyColorScheme
+        AppThemeMode.OBSIDIAN -> ObsidianProColorScheme
+        AppThemeMode.DAYLIGHT -> DaylightColorScheme
+        AppThemeMode.CUSTOM -> customColorScheme
+    }
+    val shapes = when (themeMode) {
+        AppThemeMode.TRON -> TronShapes
+        AppThemeMode.OBSIDIAN, AppThemeMode.DAYLIGHT, AppThemeMode.CUSTOM -> OpenJarvisShapes
+    }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = OpenJarvisTypography,
-        shapes = OpenJarvisShapes,
-        content = content
-    )
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val insetsController = WindowCompat.getInsetsController(window, view)
+            val useLightSystemBars = !themeMode.isDark
+            insetsController.isAppearanceLightStatusBars = useLightSystemBars
+            insetsController.isAppearanceLightNavigationBars = useLightSystemBars
+        }
+    }
+
+    CompositionLocalProvider(LocalAppThemeMode provides themeMode) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = OpenJarvisTypography,
+            shapes = shapes,
+            content = content
+        )
+    }
+}
+
+/**
+ * Atmospheric backdrop layered behind the app Scaffold:
+ * - TRON: Deep abyss with electric cyan radial horizon bloom and subtle precision Tron Grid lines.
+ * - OBSIDIAN: Volcanic OLED canvas with understated amethyst-and-gold glass sheen.
+ * - DAYLIGHT: Clean luminous daylight wash.
+ * - CUSTOM: Clean dark canvas with ambient radial aura tinted exclusively by the user's chosen color.
+ */
+@Composable
+fun JarvisThemeBackdrop(
+    themeMode: AppThemeMode,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val baseBg = MaterialTheme.colorScheme.background
+    val primaryGlow = MaterialTheme.colorScheme.primary
+    val secondaryGlow = MaterialTheme.colorScheme.secondary
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(baseBg)
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            when (themeMode) {
+                AppThemeMode.TRON -> {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryGlow.copy(alpha = 0.14f),
+                                primaryGlow.copy(alpha = 0.04f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.5f, size.height * 0.06f),
+                            radius = size.maxDimension * 0.72f
+                        )
+                    )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                secondaryGlow.copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.92f, size.height * 0.88f),
+                            radius = size.maxDimension * 0.45f
+                        )
+                    )
+                    val gridStep = 44.dp.toPx()
+                    val lineColor = primaryGlow.copy(alpha = 0.055f)
+                    val accentNodeColor = primaryGlow.copy(alpha = 0.12f)
+                    var x = 0f
+                    while (x <= size.width) {
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(x, 0f),
+                            end = Offset(x, size.height),
+                            strokeWidth = 1f
+                        )
+                        x += gridStep
+                    }
+                    var y = 0f
+                    while (y <= size.height) {
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(0f, y),
+                            end = Offset(size.width, y),
+                            strokeWidth = 1f
+                        )
+                        y += gridStep
+                    }
+                    var gx = gridStep
+                    while (gx < size.width) {
+                        var gy = gridStep
+                        while (gy < size.height * 0.45f) {
+                            drawCircle(
+                                color = accentNodeColor,
+                                radius = 1.6f,
+                                center = Offset(gx, gy)
+                            )
+                            gy += gridStep * 2
+                        }
+                        gx += gridStep * 2
+                    }
+                }
+
+                AppThemeMode.OBSIDIAN -> {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryGlow.copy(alpha = 0.11f),
+                                primaryGlow.copy(alpha = 0.03f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.85f, size.height * 0.08f),
+                            radius = size.maxDimension * 0.65f
+                        )
+                    )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                secondaryGlow.copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.12f, size.height * 0.86f),
+                            radius = size.maxDimension * 0.52f
+                        )
+                    )
+                }
+
+                AppThemeMode.CUSTOM -> {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryGlow.copy(alpha = 0.13f),
+                                primaryGlow.copy(alpha = 0.035f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.5f, size.height * 0.07f),
+                            radius = size.maxDimension * 0.70f
+                        )
+                    )
+                }
+
+                AppThemeMode.DAYLIGHT -> {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                primaryGlow.copy(alpha = 0.05f),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = size.height * 0.35f
+                        )
+                    )
+                }
+            }
+        }
+        content()
+    }
 }

@@ -21,6 +21,7 @@ import com.example.core.SelfEvolutionState
 import com.example.vision.ScreenShareState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.example.data.AppThemeMode
 import com.example.data.ChatMessageEntity
 import com.example.data.ConversationSessionEntity
 import com.example.data.DEFAULT_SESSION_ID
@@ -237,7 +238,7 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
         if (text.isBlank()) return
         conversationStateManager.updatePhase(AssistantPhase.Speaking(text.take(60)))
         coordinator.updateVoiceState {
-            it.copy(isSpeaking = true, statusText = "OpenJarvis falando…")
+            it.copy(isSpeaking = true, statusText = "A.O.Jarvis falando…")
         }
         speechController.speak(text) {
             conversationStateManager.updatePhase(AssistantPhase.Idle)
@@ -256,7 +257,7 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun testTtsVoice() {
-        speakText("Olá! Aqui é o OpenJarvis. A síntese de voz está funcionando perfeitamente.")
+        speakText("Olá! Aqui é o A.O.Jarvis. A síntese de voz está funcionando perfeitamente.")
     }
 
     fun reinitializeTts() {
@@ -549,6 +550,14 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
 
     fun regenerateLanTriggerToken() = viewModelScope.launch {
         settingsDataStore.regenerateLanTriggerToken()
+    }
+
+    fun updateThemeMode(mode: AppThemeMode) = viewModelScope.launch {
+        settingsDataStore.updateThemeMode(mode)
+    }
+
+    fun updateCustomAccentColor(argb: Long) = viewModelScope.launch {
+        settingsDataStore.updateCustomAccentColor(argb)
     }
 
     fun updateDarkTheme(enabled: Boolean) = viewModelScope.launch {

@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/openjarvis_icon_source_1795731331728"
+        android:drawable="@drawable/tron_data_disc_transparent"
         android:gravity="center" />
 </layer-list>

@@ -1,6 +1,6 @@
 {
-  "name": "OpenJarvis",
-  "description": "Assistente pessoal OpenJarvis para Android com Gemini API, conversas por voz em tempo real, integração com Ollama em rede local, comandos offline e escuta contínua em segundo plano.",
+  "name": "A.O.Jarvis",
+  "description": "Assistente pessoal A.O.Jarvis para Android com Gemini API, conversas por voz em tempo real, integração com Ollama em rede local, comandos offline, visão de tela e escuta contínua em segundo plano.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -141,7 +141,7 @@ fun RemoteUpdateCard(
                 value = githubRepoDraft,
                 onValueChange = { githubRepoDraft = it },
                 label = { Text("Repositório GitHub (usuario/repositorio)") },
-                placeholder = { Text("seu-usuario/OpenJarvis-Android") },
+                placeholder = { Text("Dazzlly/A.O.Jarvis") },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -191,7 +191,7 @@ fun RemoteUpdateCard(
                         if (generated.isBlank()) {
                             Toast.makeText(
                                 context,
-                                "Informe primeiro o repositório GitHub (ex: usuario/OpenJarvis)",
+                                "Informe primeiro o repositório GitHub (ex: Dazzlly/A.O.Jarvis)",
                                 Toast.LENGTH_SHORT
                             ).show()
                         } else {
@@ -217,7 +217,7 @@ fun RemoteUpdateCard(
                         if (generated.isBlank()) {
                             Toast.makeText(
                                 context,
-                                "Informe primeiro o repositório GitHub (ex: usuario/OpenJarvis)",
+                                "Informe primeiro o repositório GitHub (ex: Dazzlly/A.O.Jarvis)",
                                 Toast.LENGTH_SHORT
                             ).show()
                         } else {
@@ -341,7 +341,7 @@ fun RemoteUpdateCard(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "OpenJarvis atualizado! Versão local v${updateState.currentVersion} (última tag: ${updateState.latestTag}).",
+                                text = "A.O.Jarvis atualizado! Versão local v${updateState.currentVersion} (última tag: ${updateState.latestTag}).",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }

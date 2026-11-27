@@ -118,7 +118,7 @@ class JarvisBackgroundService : Service() {
                         isBackgroundRunning = true,
                         isBackgroundPaused = false,
                         errorMessage = null,
-                        statusText = "Serviço OpenJarvis ativo"
+                        statusText = "Serviço A.O.Jarvis ativo"
                     )
                 }
 
@@ -706,7 +706,7 @@ class JarvisBackgroundService : Service() {
             settings.lanTriggerEnabled ->
                 "Aguardando gatilhos LAN na porta ${settings.lanTriggerPort}"
             else ->
-                "OpenJarvis em segundo plano"
+                "A.O.Jarvis em segundo plano"
         }
     }
 
