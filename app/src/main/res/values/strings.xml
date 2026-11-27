@@ -69,4 +69,25 @@
     <string name="tools_tab_autodev">Auto-Dev</string>
     <string name="cd_share_screen">Compartilhar tela com o A.O.Jarvis</string>
     <string name="cd_pick_screenshot">Selecionar captura ou imagem para análise visual</string>
+
+    <string name="battery_opt_card_title">Otimização de Bateria (2º Plano)</string>
+    <string name="battery_opt_card_subtitle">Impede o Android de encerrar o serviço de voz contínuo em segundo plano</string>
+    <string name="battery_opt_allow_cta">Ignorar Otimização</string>
+    <string name="battery_opt_manage_cta">Gerenciar Bateria</string>
+    <string name="battery_opt_settings_short">Configurações</string>
+    <string name="battery_opt_dialog_title">Manter o A.O.Jarvis ativo em 2º plano?</string>
+    <string name="battery_opt_dialog_body">O Android aplica otimizações de bateria (Doze) que podem pausar ou encerrar o serviço de voz contínuo quando a tela apaga. Permitir que o A.O.Jarvis ignore a otimização de bateria garante respostas mais rápidas e escuta ininterrupta.</string>
+    <string name="battery_opt_dialog_confirm">Permitir em 2º Plano</string>
+    <string name="battery_opt_dialog_later">Agora não</string>
+    <string name="battery_opt_banner_title">Otimização de bateria ativa</string>
+    <string name="battery_opt_banner_body">O serviço em segundo plano pode ser encerrado pelo Android. Toque para permitir execução irrestrita.</string>
+    <string name="cd_refresh_battery_opt">Atualizar status da otimização de bateria</string>
+    <string name="cd_dismiss_battery_banner">Dispensar aviso de otimização de bateria</string>
+
+    <string name="open_tts_settings_cta">Configurar Voz, Velocidade e Tom (TTS)</string>
+    <string name="tts_settings_title">Configurações de Voz (TTS)</string>
+    <string name="tts_settings_subtitle">Voz do sistema, velocidade de fala e tom (pitch)</string>
+    <string name="cd_back">Voltar</string>
+    <string name="cd_refresh_tts_voices">Atualizar vozes TTS instaladas</string>
+    <string name="cd_preview_tts_voice">Ouvir prévia desta voz</string>
 </resources>

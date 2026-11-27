@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
 import com.example.core.AppUpdateManager
+import com.example.core.BatteryOptimizationManager
 import com.example.core.BatteryStatusMonitor
 import com.example.core.BatteryStatusSnapshot
 import com.example.core.DeviceControlForegroundService
@@ -26,10 +27,16 @@ import com.example.engine.OllamaInferenceEngine
 import com.example.engine.OpenJarvisOrchestrator
 import com.example.state.ConversationStateManager
 import com.example.vision.ScreenVisionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 data class VoiceRuntimeState(
     val isBackgroundRunning: Boolean = false,
@@ -60,13 +67,31 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
         OfflineVoiceCommandRepository(database.offlineVoiceCommandDao())
     val voiceCommandHistoryRepository: VoiceCommandHistoryRepository =
         VoiceCommandHistoryRepository(database.voiceCommandLogDao())
+    private val coordinatorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     val settingsDataStore: SettingsDataStore = SettingsDataStore(appContext)
     val speechController: NativeSpeechController = NativeSpeechController(appContext)
+    val batteryOptimizationManager: BatteryOptimizationManager = BatteryOptimizationManager(appContext)
     val integrationManager: AppIntegrationManager = AppIntegrationManager(appContext)
     val appSelfController: AppSelfController = AppSelfController(appContext)
     val appUpdateManager: AppUpdateManager = AppUpdateManager(appContext)
     val secureTokenStore: SecureTokenStore = SecureTokenStore(appContext)
     val deviceSettingsController: DeviceSettingsController = DeviceSettingsController(appContext)
+
+    init {
+        coordinatorScope.launch {
+            settingsDataStore.settingsFlow
+                .map { Triple(it.ttsVoiceName, it.ttsSpeechRate, it.ttsPitch) }
+                .distinctUntilChanged()
+                .collect { (voiceName, speechRate, pitch) ->
+                    speechController.applyTtsConfig(
+                        voiceName = voiceName,
+                        speechRate = speechRate,
+                        pitch = pitch
+                    )
+                }
+        }
+    }
     private val _deviceControlServiceState = MutableStateFlow(
         DeviceControlServiceState(
             isRunning = false,

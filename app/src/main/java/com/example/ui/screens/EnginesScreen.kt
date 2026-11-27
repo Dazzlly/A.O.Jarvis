@@ -78,6 +78,7 @@ import com.example.assistant.DefaultAssistantStatus
 import com.example.cloud.CloudSyncSummary
 import com.example.core.AppUpdateState
 import com.example.core.AutonomyPermissionItem
+import com.example.core.BatteryOptimizationStatus
 import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.FdroidRepoCheckState
@@ -143,6 +144,11 @@ fun EnginesScreen(
     onTestTts: () -> Unit,
     onStopTts: () -> Unit,
     onReinitTts: () -> Unit,
+    onOpenTtsSettings: () -> Unit,
+    batteryOptimizationStatus: BatteryOptimizationStatus,
+    onRefreshBatteryOptimization: () -> Unit,
+    onRequestIgnoreBatteryOptimizations: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> IntegrationResult,
     onUpdateRoutingMode: (RoutingMode) -> Unit,
     onUpdateOllamaConfig: (String, String) -> Unit,
     onProbeOllama: (String) -> Unit,
@@ -776,6 +782,13 @@ fun EnginesScreen(
                                 MaterialTheme.colorScheme.primary
                             }
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Velocidade ${String.format(Locale.US, "%.2fx", settings.ttsSpeechRate)} · Tom ${String.format(Locale.US, "%.2fx", settings.ttsPitch)}" +
+                                if (settings.ttsVoiceName.isNotBlank()) " · Voz personalizada" else " · Voz padrão",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
@@ -802,9 +815,36 @@ fun EnginesScreen(
                                 Icon(Icons.Rounded.Refresh, contentDescription = "Reiniciar TTS", modifier = Modifier.size(18.dp))
                             }
                         }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onOpenTtsSettings,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("open_tts_settings_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tune,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.open_tts_settings_cta))
+                        }
                     }
                 }
             }
+        }
+
+        // 4-0. Battery Optimization Check & Exemption for Foreground Service
+        item {
+            BatteryOptimizationCard(
+                status = batteryOptimizationStatus,
+                isBackgroundRunning = isBackgroundRunning,
+                onRefreshStatus = onRefreshBatteryOptimization,
+                onRequestIgnoreBatteryOptimizations = onRequestIgnoreBatteryOptimizations,
+                onOpenBatterySettings = onOpenBatteryOptimizationSettings
+            )
         }
 
         // 4A. Autonomy Permissions Hub (all Play-compliant Android permissions)

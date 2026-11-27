@@ -21,6 +21,7 @@ import com.example.cloud.JarvisCloudRepository
 import com.example.core.AppDestination
 import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
+import com.example.core.BatteryOptimizationStatus
 import com.example.core.BatteryStatusMonitor
 import com.example.core.DeviceControlServiceState
 import com.example.core.DeviceSettingsSnapshot
@@ -59,6 +60,7 @@ import com.example.state.CommandSource
 import com.example.voice.JarvisRuntimeCoordinator
 import com.example.voice.LanServerState
 import com.example.voice.TtsStatus
+import com.example.voice.TtsVoiceOption
 import com.example.voice.VoiceRuntimeState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -105,10 +107,14 @@ class OpenJarvisViewModel(
     private val deviceSettingsController = coordinator.deviceSettingsController
     private val screenVisionManager = coordinator.screenVisionManager
     private val selfEvolutionManager = coordinator.selfEvolutionManager
+    private val batteryOptimizationManager = coordinator.batteryOptimizationManager
     private val defaultAssistantManager = DefaultAssistantManager(application.applicationContext)
 
     private val _defaultAssistantStatus = MutableStateFlow(defaultAssistantManager.readStatus())
     val defaultAssistantStatus: StateFlow<DefaultAssistantStatus> = _defaultAssistantStatus.asStateFlow()
+
+    private val _batteryOptimizationStatus = MutableStateFlow(batteryOptimizationManager.readStatus())
+    val batteryOptimizationStatus: StateFlow<BatteryOptimizationStatus> = _batteryOptimizationStatus.asStateFlow()
 
     private val _isCloudSyncing = MutableStateFlow(false)
     private val _cloudStatusMessage = MutableStateFlow(
@@ -316,6 +322,8 @@ class OpenJarvisViewModel(
     val voiceState: StateFlow<VoiceRuntimeState> = coordinator.voiceState
     val liveVoiceState: StateFlow<LiveVoiceState> = coordinator.geminiLiveManager.state
     val ttsStatus: StateFlow<TtsStatus> = speechController.ttsStatus
+    val availableTtsVoices: StateFlow<List<TtsVoiceOption>> = speechController.availableVoices
+    val activeTtsVoiceName: StateFlow<String> = speechController.activeVoiceName
     val isTtsSpeaking: StateFlow<Boolean> = speechController.isSpeaking
     val guidedTour: StateFlow<GuidedTourState> = appSelfController.guidedTour
     val uiCommands: SharedFlow<AppUiCommand> = appSelfController.uiCommands
@@ -456,8 +464,89 @@ class OpenJarvisViewModel(
         speakText("Olá! Aqui é o A.O.Jarvis. A síntese de voz está funcionando perfeitamente.")
     }
 
+    fun previewTtsSample(
+        sampleText: String,
+        voiceNameOverride: String? = null
+    ) {
+        val textToSpeak = sampleText.trim().ifBlank {
+            "Olá! Aqui é o A.O.Jarvis. Esta é uma prévia da minha voz configurada."
+        }
+        val current = settings.value
+        conversationStateManager.updatePhase(AssistantPhase.Speaking(textToSpeak.take(60)))
+        coordinator.updateVoiceState {
+            it.copy(isSpeaking = true, statusText = "Testando voz TTS…")
+        }
+        speechController.previewVoice(
+            text = textToSpeak,
+            voiceNameOverride = voiceNameOverride ?: current.ttsVoiceName,
+            speechRateOverride = current.ttsSpeechRate,
+            pitchOverride = current.ttsPitch
+        ) {
+            conversationStateManager.updatePhase(AssistantPhase.Idle)
+            coordinator.updateVoiceState {
+                it.copy(isSpeaking = false, statusText = "Pronto para escutar")
+            }
+        }
+    }
+
     fun reinitializeTts() {
         speechController.reinitializeTts()
+    }
+
+    fun refreshTtsVoices() {
+        speechController.refreshVoices()
+    }
+
+    fun updateTtsVoiceName(voiceName: String) = viewModelScope.launch {
+        settingsDataStore.updateTtsVoiceName(voiceName)
+    }
+
+    fun updateTtsSpeechRate(rate: Float) = viewModelScope.launch {
+        settingsDataStore.updateTtsSpeechRate(rate)
+    }
+
+    fun updateTtsPitch(pitch: Float) = viewModelScope.launch {
+        settingsDataStore.updateTtsPitch(pitch)
+    }
+
+    fun resetTtsSettings() = viewModelScope.launch {
+        settingsDataStore.resetTtsSettings()
+    }
+
+    fun openSystemTtsSettings(): IntegrationResult {
+        val app = getApplication<Application>()
+        return runCatching {
+            val intent = Intent("com.android.settings.TTS_SETTINGS").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            app.startActivity(intent)
+            IntegrationResult(
+                success = true,
+                message = "Configurações de TTS do Android abertas.",
+                toolName = "system_tts_settings"
+            )
+        }.getOrElse {
+            IntegrationResult(
+                success = false,
+                message = "Não foi possível abrir as configurações de TTS do sistema.",
+                toolName = "system_tts_settings"
+            )
+        }
+    }
+
+    // Battery Optimization Check & Exemption Request
+    fun refreshBatteryOptimizationStatus() {
+        _batteryOptimizationStatus.value = batteryOptimizationManager.readStatus()
+    }
+
+    fun createBatteryOptimizationRequestIntent(): Intent {
+        return batteryOptimizationManager.createBestExemptionIntent()
+    }
+
+    fun openBatteryOptimizationSettings(): IntegrationResult {
+        return batteryOptimizationManager.openBatteryOptimizationSettings().also {
+            refreshBatteryOptimizationStatus()
+        }
     }
 
     // Self-navigation & Guided Tour

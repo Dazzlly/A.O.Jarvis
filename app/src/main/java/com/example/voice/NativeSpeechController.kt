@@ -11,6 +11,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +27,21 @@ sealed interface TtsStatus {
     data class Ready(val localeLabel: String) : TtsStatus
     data class Error(val reason: String) : TtsStatus
 }
+
+data class TtsVoiceOption(
+    val name: String,
+    val displayName: String,
+    val localeTag: String,
+    val localeDisplayName: String,
+    val qualityLabel: String,
+    val isNetworkRequired: Boolean
+)
+
+data class TtsEngineConfig(
+    val voiceName: String = "",
+    val speechRate: Float = 1.0f,
+    val pitch: Float = 1.0f
+)
 
 private data class PendingSpeech(
     val text: String,
@@ -50,9 +66,17 @@ class NativeSpeechController(private val context: Context) {
     private var pendingSpeech: PendingSpeech? = null
     private var finalUtteranceId: String? = null
     private var onTtsComplete: (() -> Unit)? = null
+    private var ttsConfig: TtsEngineConfig = TtsEngineConfig()
+    private var systemVoiceMap: Map<String, Voice> = emptyMap()
 
     private val _ttsStatus = MutableStateFlow<TtsStatus>(TtsStatus.Initializing)
     val ttsStatus: StateFlow<TtsStatus> = _ttsStatus.asStateFlow()
+
+    private val _availableVoices = MutableStateFlow<List<TtsVoiceOption>>(emptyList())
+    val availableVoices: StateFlow<List<TtsVoiceOption>> = _availableVoices.asStateFlow()
+
+    private val _activeVoiceName = MutableStateFlow("")
+    val activeVoiceName: StateFlow<String> = _activeVoiceName.asStateFlow()
 
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
@@ -96,11 +120,76 @@ class NativeSpeechController(private val context: Context) {
         }
     }
 
+    fun applyTtsConfig(
+        voiceName: String,
+        speechRate: Float,
+        pitch: Float
+    ) {
+        val nextConfig = TtsEngineConfig(
+            voiceName = voiceName.trim(),
+            speechRate = speechRate.coerceIn(0.5f, 2.0f),
+            pitch = pitch.coerceIn(0.5f, 2.0f)
+        )
+        ttsConfig = nextConfig
+        mainHandler.post {
+            val engine = tts
+            if (ttsReady && engine != null) {
+                configureTtsAudioAndLocale(engine, "pt-BR")
+                _ttsStatus.value = TtsStatus.Ready(buildReadyStatusLabel(engine))
+            }
+        }
+    }
+
+    fun refreshVoices() {
+        mainHandler.post {
+            val engine = tts
+            if (ttsReady && engine != null) {
+                loadAvailableVoices(engine)
+                configureTtsAudioAndLocale(engine, "pt-BR")
+                _ttsStatus.value = TtsStatus.Ready(buildReadyStatusLabel(engine))
+            } else {
+                reinitializeTts()
+            }
+        }
+    }
+
+    fun previewVoice(
+        text: String,
+        voiceNameOverride: String? = null,
+        speechRateOverride: Float? = null,
+        pitchOverride: Float? = null,
+        onComplete: (() -> Unit)? = null
+    ) {
+        val cleanText = sanitizeForSpeech(text)
+        if (cleanText.isBlank()) {
+            onComplete?.let { mainHandler.post(it) }
+            return
+        }
+        mainHandler.post {
+            val engine = tts
+            if (!ttsReady || engine == null) {
+                speak(cleanText, onComplete = onComplete)
+                return@post
+            }
+            val effectiveVoice = voiceNameOverride ?: ttsConfig.voiceName
+            val effectiveRate = (speechRateOverride ?: ttsConfig.speechRate).coerceIn(0.5f, 2.0f)
+            val effectivePitch = (pitchOverride ?: ttsConfig.pitch).coerceIn(0.5f, 2.0f)
+            applyParametersToEngine(engine, effectiveVoice, effectiveRate, effectivePitch, "pt-BR")
+            speakInternal(
+                cleanText = cleanText,
+                localeTag = "pt-BR",
+                onComplete = onComplete,
+                skipConfigure = true
+            )
+        }
+    }
+
     private fun initTtsEngine() {
         tts = TextToSpeech(appContext) { status ->
             mainHandler.post {
                 if (status == TextToSpeech.SUCCESS) {
                     val engine = tts ?: return@post
+                    loadAvailableVoices(engine)
                     configureTtsAudioAndLocale(engine, "pt-BR")
                     engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) {
@@ -128,7 +217,7 @@ class NativeSpeechController(private val context: Context) {
                         }
                     })
                     ttsReady = true
-                    _ttsStatus.value = TtsStatus.Ready(activeLocale.displayName)
+                    _ttsStatus.value = TtsStatus.Ready(buildReadyStatusLabel(engine))
 
                     // Flush any speech queued while TTS was booting
                     val queued = pendingSpeech
@@ -138,6 +227,8 @@ class NativeSpeechController(private val context: Context) {
                     }
                 } else {
                     ttsReady = false
+                    _availableVoices.value = emptyList()
+                    systemVoiceMap = emptyMap()
                     _ttsStatus.value = TtsStatus.Error("Motor TTS do sistema indisponível (código $status)")
                     Log.w(TAG, "TextToSpeech init failed with status=$status")
                     val queued = pendingSpeech
@@ -148,15 +239,120 @@ class NativeSpeechController(private val context: Context) {
         }
     }
 
+    private fun loadAvailableVoices(engine: TextToSpeech) {
+        val rawVoices = runCatching { engine.voices }.getOrNull().orEmpty()
+        val installed = rawVoices.filter { voice ->
+            val features = runCatching { voice.features }.getOrNull().orEmpty()
+            !features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+        }
+        systemVoiceMap = installed.associateBy { it.name }
+
+        val deviceLocale = Locale.getDefault()
+        val options = installed.map { voice ->
+            val locale = voice.locale ?: deviceLocale
+            val localeTag = locale.toLanguageTag()
+            val localeDisplay = locale.getDisplayName(Locale("pt", "BR"))
+                .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("pt", "BR")) else it.toString() }
+            TtsVoiceOption(
+                name = voice.name,
+                displayName = formatVoiceDisplayName(voice, localeDisplay),
+                localeTag = localeTag,
+                localeDisplayName = localeDisplay,
+                qualityLabel = mapVoiceQuality(voice.quality),
+                isNetworkRequired = voice.isNetworkConnectionRequired
+            )
+        }.sortedWith(
+            compareBy<TtsVoiceOption>(
+                { voiceLocalePriority(it.localeTag, deviceLocale.toLanguageTag()) },
+                { it.isNetworkRequired },
+                { it.localeDisplayName.lowercase(Locale.ROOT) },
+                { it.displayName.lowercase(Locale.ROOT) }
+            )
+        )
+        _availableVoices.value = options
+    }
+
+    private fun voiceLocalePriority(localeTag: String, deviceTag: String): Int {
+        val lower = localeTag.lowercase(Locale.ROOT)
+        return when {
+            lower == "pt-br" -> 0
+            lower.startsWith("pt") -> 1
+            lower.equals(deviceTag, ignoreCase = true) -> 2
+            lower.startsWith("en-us") -> 3
+            lower.startsWith("en") -> 4
+            lower.startsWith("es") -> 5
+            else -> 6
+        }
+    }
+
+    private fun formatVoiceDisplayName(voice: Voice, localeDisplay: String): String {
+        val shortCode = voice.name
+            .substringAfterLast("#", voice.name)
+            .substringAfterLast("-", voice.name)
+            .replace("_", " ")
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+        return if (shortCode.isNotBlank() && shortCode.length <= 24) {
+            "$localeDisplay · $shortCode"
+        } else {
+            "$localeDisplay (${voice.name.take(18)})"
+        }
+    }
+
+    private fun mapVoiceQuality(quality: Int): String = when {
+        quality >= Voice.QUALITY_VERY_HIGH -> "Ultra"
+        quality >= Voice.QUALITY_HIGH -> "Alta"
+        quality >= Voice.QUALITY_NORMAL -> "Normal"
+        else -> "Compacta"
+    }
+
+    private fun buildReadyStatusLabel(engine: TextToSpeech): String {
+        val currentVoice = runCatching { engine.voice }.getOrNull()
+        val localeLabel = (currentVoice?.locale ?: activeLocale).getDisplayName(Locale("pt", "BR"))
+        return if (ttsConfig.voiceName.isNotBlank() && currentVoice != null) {
+            formatVoiceDisplayName(currentVoice, localeLabel)
+        } else {
+            localeLabel
+        }
+    }
+
     private fun configureTtsAudioAndLocale(engine: TextToSpeech, preferredTag: String) {
+        applyParametersToEngine(
+            engine = engine,
+            voiceName = ttsConfig.voiceName,
+            speechRate = ttsConfig.speechRate,
+            pitch = ttsConfig.pitch,
+            preferredTag = preferredTag
+        )
+    }
+
+    private fun applyParametersToEngine(
+        engine: TextToSpeech,
+        voiceName: String,
+        speechRate: Float,
+        pitch: Float,
+        preferredTag: String
+    ) {
         val audioAttrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
         runCatching { engine.setAudioAttributes(audioAttrs) }
         runCatching {
-            engine.setSpeechRate(1.04f)
-            engine.setPitch(1.0f)
+            engine.setSpeechRate(speechRate.coerceIn(0.5f, 2.0f))
+            engine.setPitch(pitch.coerceIn(0.5f, 2.0f))
+        }
+
+        if (voiceName.isNotBlank()) {
+            val requestedVoice = systemVoiceMap[voiceName]
+                ?: runCatching { engine.voices?.firstOrNull { it.name == voiceName } }.getOrNull()
+            if (requestedVoice != null) {
+                val res = runCatching { engine.setVoice(requestedVoice) }.getOrDefault(TextToSpeech.ERROR)
+                if (res == TextToSpeech.SUCCESS) {
+                    activeLocale = requestedVoice.locale ?: Locale.getDefault()
+                    _activeVoiceName.value = requestedVoice.name
+                    return
+                }
+            }
         }
 
         val candidates = listOf(
@@ -172,10 +368,12 @@ class NativeSpeechController(private val context: Context) {
                 .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
             if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
                 activeLocale = candidate
+                _activeVoiceName.value = runCatching { engine.voice?.name.orEmpty() }.getOrDefault("")
                 return
             }
         }
         activeLocale = Locale.getDefault()
+        _activeVoiceName.value = runCatching { engine.voice?.name.orEmpty() }.getOrDefault("")
     }
 
     private fun finishSpeakingCallback() {
@@ -340,7 +538,8 @@ class NativeSpeechController(private val context: Context) {
     private fun speakInternal(
         cleanText: String,
         localeTag: String,
-        onComplete: (() -> Unit)?
+        onComplete: (() -> Unit)?,
+        skipConfigure: Boolean = false
     ) {
         val engine = tts
         if (engine == null) {
@@ -352,7 +551,9 @@ class NativeSpeechController(private val context: Context) {
         // Pause recognizer if active so microphone does not capture TTS output
         runCatching { speechRecognizer?.cancel() }
 
-        configureTtsAudioAndLocale(engine, localeTag)
+        if (!skipConfigure) {
+            configureTtsAudioAndLocale(engine, localeTag)
+        }
         val chunks = splitIntoSpeechChunks(cleanText)
         if (chunks.isEmpty()) {
             _isSpeaking.value = false

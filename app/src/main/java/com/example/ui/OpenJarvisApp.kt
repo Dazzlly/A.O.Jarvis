@@ -86,10 +86,13 @@ import com.example.core.AppUpdateState
 import com.example.core.GuidedTourStep
 import com.example.core.PermissionsManager
 import com.example.data.AppThemeMode
+import com.example.ui.screens.BatteryOptimizationPromptDialog
+import com.example.ui.screens.BatteryOptimizationWarningBanner
 import com.example.ui.screens.ConsoleScreen
 import com.example.ui.screens.EnginesScreen
 import com.example.ui.screens.TelemetryScreen
 import com.example.ui.screens.ToolsMemoryScreen
+import com.example.ui.screens.TtsSettingsScreen
 import com.example.ui.theme.JarvisThemeBackdrop
 import com.example.ui.theme.OpenJarvisTheme
 
@@ -131,6 +134,8 @@ fun OpenJarvisApp(
     val voiceState by viewModel.voiceState.collectAsStateWithLifecycle()
     val liveVoiceState by viewModel.liveVoiceState.collectAsStateWithLifecycle()
     val ttsStatus by viewModel.ttsStatus.collectAsStateWithLifecycle()
+    val availableTtsVoices by viewModel.availableTtsVoices.collectAsStateWithLifecycle()
+    val activeTtsVoiceName by viewModel.activeTtsVoiceName.collectAsStateWithLifecycle()
     val isTtsSpeaking by viewModel.isTtsSpeaking.collectAsStateWithLifecycle()
     val guidedTour by viewModel.guidedTour.collectAsStateWithLifecycle()
     val ollamaHealth by viewModel.ollamaHealth.collectAsStateWithLifecycle()
@@ -142,10 +147,14 @@ fun OpenJarvisApp(
     val deviceControlServiceState by viewModel.deviceControlServiceState.collectAsStateWithLifecycle()
     val cloudSyncSummary by viewModel.cloudSyncSummary.collectAsStateWithLifecycle()
     val defaultAssistantStatus by viewModel.defaultAssistantStatus.collectAsStateWithLifecycle()
+    val batteryOptimizationStatus by viewModel.batteryOptimizationStatus.collectAsStateWithLifecycle()
     val selfEvolutionState by viewModel.selfEvolutionState.collectAsStateWithLifecycle()
     val hasGitHubToken by viewModel.hasGitHubToken.collectAsStateWithLifecycle()
 
     var currentTab by rememberSaveable { mutableStateOf(JarvisTab.CONSOLE) }
+    var showTtsSettingsScreen by rememberSaveable { mutableStateOf(false) }
+    var showBatteryOptPromptDialog by rememberSaveable { mutableStateOf(false) }
+    var batteryBannerDismissed by rememberSaveable { mutableStateOf(false) }
     var selectedConsoleMode by rememberSaveable { mutableIntStateOf(0) } // 0 = Native STT & Chat, 1 = Gemini Live
     var selectedToolsTab by rememberSaveable { mutableIntStateOf(0) } // 0 = Comandos, 1 = Memórias, 2 = Auto-Dev
     var selfEvolutionDraft by rememberSaveable { mutableStateOf("") }
@@ -173,8 +182,12 @@ fun OpenJarvisApp(
         viewModel.reportCurrentDestination(currentTab.destination)
     }
 
-    BackHandler(enabled = currentTab != JarvisTab.CONSOLE) {
-        currentTab = JarvisTab.CONSOLE
+    BackHandler(enabled = showTtsSettingsScreen || currentTab != JarvisTab.CONSOLE) {
+        if (showTtsSettingsScreen) {
+            showTtsSettingsScreen = false
+        } else {
+            currentTab = JarvisTab.CONSOLE
+        }
     }
 
     val permissionsLauncher = rememberLauncherForActivityResult(
@@ -248,11 +261,26 @@ fun OpenJarvisApp(
         }
     }
 
-    // Auto-refresh Default Assistant & Device Settings when returning from Android system settings
+    val batteryOptimizationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.refreshBatteryOptimizationStatus()
+        if (viewModel.batteryOptimizationStatus.value.isIgnoringOptimizations) {
+            batteryBannerDismissed = true
+            Toast.makeText(
+                context,
+                "Otimização de bateria ignorada! O serviço em segundo plano ficará protegido.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // Auto-refresh Default Assistant, Battery Optimization & Device Settings on resume
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshDefaultAssistantStatus()
+                viewModel.refreshBatteryOptimizationStatus()
                 viewModel.refreshDeviceSettings()
             }
         }
@@ -325,6 +353,24 @@ fun OpenJarvisApp(
         }
     }
 
+    fun launchBatteryOptimizationExemptionFlow() {
+        val intent = viewModel.createBatteryOptimizationRequestIntent()
+        runCatching {
+            batteryOptimizationLauncher.launch(intent)
+        }.onFailure {
+            val fallback = viewModel.openBatteryOptimizationSettings()
+            Toast.makeText(context, fallback.message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun checkAndPromptBatteryOptimizationIfNeeded() {
+        viewModel.refreshBatteryOptimizationStatus()
+        if (!viewModel.batteryOptimizationStatus.value.isIgnoringOptimizations) {
+            batteryBannerDismissed = false
+            showBatteryOptPromptDialog = true
+        }
+    }
+
     // Automatically open Console and start voice listening when triggered via Default Assistant gesture / ACTION_ASSIST
     LaunchedEffect(assistantLaunchSignal) {
         if (assistantLaunchSignal > 0) {
@@ -362,11 +408,13 @@ fun OpenJarvisApp(
         viewModel.uiCommands.collect { command ->
             when (command) {
                 is AppUiCommand.NavigateTo -> {
+                    showTtsSettingsScreen = false
                     currentTab = JarvisTab.entries.firstOrNull { it.destination == command.destination }
                         ?: JarvisTab.CONSOLE
                 }
 
                 is AppUiCommand.SetConsoleMode -> {
+                    showTtsSettingsScreen = false
                     currentTab = JarvisTab.CONSOLE
                     selectedConsoleMode = if (command.geminiLive) 1 else 0
                 }
@@ -388,6 +436,7 @@ fun OpenJarvisApp(
                         val needsMic = settings.voiceListeningInBgEnabled
                         requestPermissionsAndRun(requireMic = needsMic, includeNotifications = true) {
                             viewModel.startBackgroundServiceExplicitly()
+                            checkAndPromptBatteryOptimizationIfNeeded()
                         }
                     } else {
                         viewModel.stopBackgroundServiceExplicitly()
@@ -431,7 +480,17 @@ fun OpenJarvisApp(
                     viewModel.stopScreenShare()
                 }
 
+                AppUiCommand.OpenTtsSettings -> {
+                    viewModel.refreshTtsVoices()
+                    showTtsSettingsScreen = true
+                }
+
+                AppUiCommand.PromptBatteryOptimization -> {
+                    checkAndPromptBatteryOptimizationIfNeeded()
+                }
+
                 is AppUiCommand.StartSelfEvolution -> {
+                    showTtsSettingsScreen = false
                     currentTab = JarvisTab.TOOLS
                     selectedToolsTab = 2
                     selfEvolutionDraft = command.request
@@ -459,7 +518,7 @@ fun OpenJarvisApp(
                     containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets.safeDrawing,
                     bottomBar = {
-                        if (!useRail) {
+                        if (!useRail && !showTtsSettingsScreen) {
                             Column {
                                 HorizontalDivider(
                                     thickness = 1.dp,
@@ -477,7 +536,10 @@ fun OpenJarvisApp(
                                         val selected = currentTab == tab
                                         NavigationBarItem(
                                             selected = selected,
-                                            onClick = { currentTab = tab },
+                                            onClick = {
+                                                showTtsSettingsScreen = false
+                                                currentTab = tab
+                                            },
                                             icon = {
                                                 Icon(
                                                     imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
@@ -498,13 +560,16 @@ fun OpenJarvisApp(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    if (useRail) {
+                    if (useRail && !showTtsSettingsScreen) {
                         NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
                             JarvisTab.entries.forEach { tab ->
                                 val selected = currentTab == tab
                                 NavigationRailItem(
                                     selected = selected,
-                                    onClick = { currentTab = tab },
+                                    onClick = {
+                                        showTtsSettingsScreen = false
+                                        currentTab = tab
+                                    },
                                     icon = {
                                         Icon(
                                             imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
@@ -568,13 +633,45 @@ fun OpenJarvisApp(
                             }
                         }
 
+                        // Battery Optimization Warning Banner when Background Service is active while restricted
+                        AnimatedVisibility(
+                            visible = !showTtsSettingsScreen &&
+                                voiceState.isBackgroundRunning &&
+                                !batteryOptimizationStatus.isIgnoringOptimizations &&
+                                !batteryBannerDismissed
+                        ) {
+                            BatteryOptimizationWarningBanner(
+                                onRequestIgnore = { launchBatteryOptimizationExemptionFlow() },
+                                onDismiss = { batteryBannerDismissed = true }
+                            )
+                        }
+
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth(),
                             contentAlignment = Alignment.TopCenter
                         ) {
-                            when (currentTab) {
+                            if (showTtsSettingsScreen) {
+                                TtsSettingsScreen(
+                                    settings = settings,
+                                    ttsStatus = ttsStatus,
+                                    availableVoices = availableTtsVoices,
+                                    activeVoiceName = activeTtsVoiceName,
+                                    isTtsSpeaking = isTtsSpeaking,
+                                    onBack = { showTtsSettingsScreen = false },
+                                    onSelectVoice = { viewModel.updateTtsVoiceName(it) },
+                                    onUpdateSpeechRate = { viewModel.updateTtsSpeechRate(it) },
+                                    onUpdatePitch = { viewModel.updateTtsPitch(it) },
+                                    onResetDefaults = { viewModel.resetTtsSettings() },
+                                    onPreviewSpeech = { text, voiceOverride ->
+                                        viewModel.previewTtsSample(text, voiceOverride)
+                                    },
+                                    onStopSpeaking = { viewModel.stopSpeaking() },
+                                    onRefreshVoices = { viewModel.refreshTtsVoices() },
+                                    onOpenSystemTtsSettings = { viewModel.openSystemTtsSettings() }
+                                )
+                            } else when (currentTab) {
                                 JarvisTab.CONSOLE -> ConsoleScreen(
                                     sessions = sessions,
                                     activeSessionId = activeSessionId,
@@ -610,12 +707,16 @@ fun OpenJarvisApp(
                                         }
                                     },
                                     onToggleBackground = {
-                                        val needsMic = !voiceState.isBackgroundRunning && settings.voiceListeningInBgEnabled
+                                        val starting = !voiceState.isBackgroundRunning
+                                        val needsMic = starting && settings.voiceListeningInBgEnabled
                                         requestPermissionsAndRun(
                                             requireMic = needsMic,
                                             includeNotifications = true
                                         ) {
                                             viewModel.toggleBackgroundService()
+                                            if (starting) {
+                                                checkAndPromptBatteryOptimizationIfNeeded()
+                                            }
                                         }
                                     },
                                     onToggleScreenShare = {
@@ -660,6 +761,14 @@ fun OpenJarvisApp(
                                     onTestTts = { viewModel.testTtsVoice() },
                                     onStopTts = { viewModel.stopSpeaking() },
                                     onReinitTts = { viewModel.reinitializeTts() },
+                                    onOpenTtsSettings = {
+                                        viewModel.refreshTtsVoices()
+                                        showTtsSettingsScreen = true
+                                    },
+                                    batteryOptimizationStatus = batteryOptimizationStatus,
+                                    onRefreshBatteryOptimization = { viewModel.refreshBatteryOptimizationStatus() },
+                                    onRequestIgnoreBatteryOptimizations = { launchBatteryOptimizationExemptionFlow() },
+                                    onOpenBatteryOptimizationSettings = { viewModel.openBatteryOptimizationSettings() },
                                     onUpdateRoutingMode = { viewModel.updateRoutingMode(it) },
                                     onUpdateOllamaConfig = { url, model -> viewModel.updateOllamaConfig(url, model) },
                                     onProbeOllama = { viewModel.probeOllama(it) },
@@ -679,12 +788,16 @@ fun OpenJarvisApp(
                                     },
                                     onRegenerateLanToken = { viewModel.regenerateLanTriggerToken() },
                                     onToggleBackgroundService = {
-                                        val needsMic = !voiceState.isBackgroundRunning && settings.voiceListeningInBgEnabled
+                                        val starting = !voiceState.isBackgroundRunning
+                                        val needsMic = starting && settings.voiceListeningInBgEnabled
                                         requestPermissionsAndRun(
                                             requireMic = needsMic,
                                             includeNotifications = true
                                         ) {
                                             viewModel.toggleBackgroundService()
+                                            if (starting) {
+                                                checkAndPromptBatteryOptimizationIfNeeded()
+                                            }
                                         }
                                     },
                                     updateState = updateState,
@@ -824,6 +937,18 @@ fun OpenJarvisApp(
                         }
                     }
                 }
+            }
+
+            if (showBatteryOptPromptDialog && !batteryOptimizationStatus.isIgnoringOptimizations) {
+                BatteryOptimizationPromptDialog(
+                    onAllow = {
+                        showBatteryOptPromptDialog = false
+                        launchBatteryOptimizationExemptionFlow()
+                    },
+                    onDismiss = {
+                        showBatteryOptPromptDialog = false
+                    }
+                )
             }
         }
         }

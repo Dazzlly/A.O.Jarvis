@@ -89,7 +89,10 @@ data class JarvisSettings(
     val themeMode: AppThemeMode = AppThemeMode.TRON,
     val customAccentColor: Long = DEFAULT_CUSTOM_ACCENT_COLOR,
     val darkTheme: Boolean = true,
-    val skipAccountSignIn: Boolean = false
+    val skipAccountSignIn: Boolean = false,
+    val ttsVoiceName: String = "",
+    val ttsSpeechRate: Float = 1.0f,
+    val ttsPitch: Float = 1.0f
 )
 
 class SettingsDataStore(private val context: Context) {
@@ -118,6 +121,9 @@ class SettingsDataStore(private val context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val CUSTOM_ACCENT_COLOR = longPreferencesKey("custom_accent_color")
         val SKIP_ACCOUNT_SIGN_IN = booleanPreferencesKey("skip_account_sign_in")
+        val TTS_VOICE_NAME = stringPreferencesKey("tts_voice_name")
+        val TTS_SPEECH_RATE = floatPreferencesKey("tts_speech_rate")
+        val TTS_PITCH = floatPreferencesKey("tts_pitch")
     }
 
     val settingsFlow: Flow<JarvisSettings> = context.jarvisDataStore.data.map { prefs ->
@@ -155,7 +161,10 @@ class SettingsDataStore(private val context: Context) {
             themeMode = resolvedThemeMode,
             customAccentColor = prefs[Keys.CUSTOM_ACCENT_COLOR] ?: DEFAULT_CUSTOM_ACCENT_COLOR,
             darkTheme = resolvedThemeMode.isDark,
-            skipAccountSignIn = prefs[Keys.SKIP_ACCOUNT_SIGN_IN] ?: false
+            skipAccountSignIn = prefs[Keys.SKIP_ACCOUNT_SIGN_IN] ?: false,
+            ttsVoiceName = prefs[Keys.TTS_VOICE_NAME] ?: "",
+            ttsSpeechRate = (prefs[Keys.TTS_SPEECH_RATE] ?: 1.0f).coerceIn(0.5f, 2.0f),
+            ttsPitch = (prefs[Keys.TTS_PITCH] ?: 1.0f).coerceIn(0.5f, 2.0f)
         )
     }
 
@@ -265,6 +274,32 @@ class SettingsDataStore(private val context: Context) {
     suspend fun updateSkipAccountSignIn(skipped: Boolean) {
         context.jarvisDataStore.edit {
             it[Keys.SKIP_ACCOUNT_SIGN_IN] = skipped
+        }
+    }
+
+    suspend fun updateTtsVoiceName(voiceName: String) {
+        context.jarvisDataStore.edit {
+            it[Keys.TTS_VOICE_NAME] = voiceName.trim()
+        }
+    }
+
+    suspend fun updateTtsSpeechRate(rate: Float) {
+        context.jarvisDataStore.edit {
+            it[Keys.TTS_SPEECH_RATE] = rate.coerceIn(0.5f, 2.0f)
+        }
+    }
+
+    suspend fun updateTtsPitch(pitch: Float) {
+        context.jarvisDataStore.edit {
+            it[Keys.TTS_PITCH] = pitch.coerceIn(0.5f, 2.0f)
+        }
+    }
+
+    suspend fun resetTtsSettings() {
+        context.jarvisDataStore.edit {
+            it[Keys.TTS_VOICE_NAME] = ""
+            it[Keys.TTS_SPEECH_RATE] = 1.0f
+            it[Keys.TTS_PITCH] = 1.0f
         }
     }
 

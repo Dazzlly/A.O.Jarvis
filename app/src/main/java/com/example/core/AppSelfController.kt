@@ -64,6 +64,8 @@ sealed interface AppUiCommand {
     data object CheckUpdates : AppUiCommand
     data object RequestScreenShare : AppUiCommand
     data object StopScreenShare : AppUiCommand
+    data object OpenTtsSettings : AppUiCommand
+    data object PromptBatteryOptimization : AppUiCommand
     data class StartSelfEvolution(val request: String) : AppUiCommand
     data class ShowGuidanceBanner(val message: String) : AppUiCommand
 }
@@ -208,6 +210,8 @@ class AppSelfController(private val appContext: Context) {
             append("- [[ACTION:NEW_SESSION]] (cria uma nova conversa)\n")
             append("- [[ACTION:PROBE_OLLAMA]] (testa conexão com o servidor Ollama local)\n")
             append("- [[ACTION:CHECK_UPDATES]] (verifica atualizações do app via GitHub Releases / F-Droid)\n")
+            append("- [[ACTION:OPEN_TTS_SETTINGS]] (abre a tela de configurações de voz TTS para escolher voz, velocidade e tom)\n")
+            append("- [[ACTION:BATTERY_OPT_PROMPT]] (abre a solicitação para ignorar otimização de bateria em segundo plano)\n")
             append("- [[ACTION:REQUEST_PERMISSIONS]] (abre pedido de todas as permissões de autonomia)\n")
             append("- [[ACTION:TOUR:START]] (inicia o tour guiado interativo pelo próprio app)\n")
             append("- [[ACTION:OPEN_APP:<nome>]] (abre apps instalados no dispositivo)\n")
@@ -336,6 +340,16 @@ class AppSelfController(private val appContext: Context) {
                 "CHECK_UPDATES" -> {
                     emitCommand(AppUiCommand.NavigateTo(AppDestination.ENGINES))
                     emitCommand(AppUiCommand.CheckUpdates)
+                }
+
+                "OPEN_TTS_SETTINGS" -> {
+                    emitCommand(AppUiCommand.OpenTtsSettings)
+                    executedNotes.add("Configurações de voz TTS abertas")
+                }
+
+                "BATTERY_OPT_PROMPT" -> {
+                    emitCommand(AppUiCommand.PromptBatteryOptimization)
+                    executedNotes.add("Verificação de otimização de bateria aberta")
                 }
 
                 "REQUEST_PERMISSIONS" -> {
