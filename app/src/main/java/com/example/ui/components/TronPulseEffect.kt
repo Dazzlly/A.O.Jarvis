@@ -103,8 +103,9 @@ fun TronPulseHaloBox(
     ) {
         if (pulse.glowAlpha > 0.01f) {
             Canvas(modifier = Modifier.matchParentSize()) {
-                val center = Offset(size.width / 2f, size.height / 2f)
                 val maxR = size.minDimension / 2f
+                if (maxR <= 1f) return@Canvas
+                val center = Offset(size.width / 2f, size.height / 2f)
 
                 // Soft inner radial Tron glow
                 drawCircle(
@@ -115,14 +116,14 @@ fun TronPulseHaloBox(
                             Color.Transparent
                         ),
                         center = center,
-                        radius = maxR
+                        radius = maxR.coerceAtLeast(1f)
                     ),
                     radius = maxR,
                     center = center
                 )
 
                 // Expanding subtle neon pulse ring
-                val ringRadius = maxR * (0.64f + 0.32f * pulse.ringExpandFraction)
+                val ringRadius = (maxR * (0.64f + 0.32f * pulse.ringExpandFraction)).coerceAtLeast(1f)
                 val ringAlpha = ((1f - pulse.ringExpandFraction) * 0.65f).coerceIn(0f, 0.65f)
                 drawCircle(
                     color = pulseColor.copy(alpha = ringAlpha),

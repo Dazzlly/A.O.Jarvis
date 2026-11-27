@@ -34,7 +34,7 @@ class GeminiInferenceEngine {
         } else ""
 
         val baseInstruction = settings.systemPrompt.ifBlank {
-            "Você é o OpenJarvis, um assistente pessoal inteligente em português do Brasil."
+            "Você é o A.O.Jarvis, um assistente pessoal inteligente em português do Brasil."
         }
         val fullInstruction = baseInstruction + selfAwarenessContext + memoryBlock
 

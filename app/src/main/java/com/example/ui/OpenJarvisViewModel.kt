@@ -30,9 +30,8 @@ import com.example.core.FdroidRepoCheckState
 import com.example.core.GuidedTourState
 import com.example.core.IntegrationResult
 import com.example.core.SelfEvolutionState
+import com.example.cloud.getFirebaseAuthOrNull
 import com.example.vision.ScreenShareState
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
@@ -220,7 +219,7 @@ class OpenJarvisViewModel(
                 errorMessage = null
             )
         } else {
-            val user = Firebase.auth.currentUser
+            val user = getFirebaseAuthOrNull(getApplication())?.currentUser
             val memCount = (memState as? CloudUiState.Success)?.data?.size ?: 0
             val cmdCount = (cmdState as? CloudUiState.Success)?.data?.size ?: 0
             val sessCount = (sessState as? CloudUiState.Success)?.data?.size ?: 0
@@ -246,19 +245,31 @@ class OpenJarvisViewModel(
         initialValue = CloudSyncSummary(
             isAuthenticated = isCloudAuthenticated,
             userId = currentUserId.orEmpty(),
-            displayName = if (isCloudAuthenticated) Firebase.auth.currentUser?.displayName.orEmpty() else "Modo Local (Sem Conta)",
-            email = if (isCloudAuthenticated) Firebase.auth.currentUser?.email.orEmpty() else "Sincronização em nuvem desativada"
+            displayName = if (isCloudAuthenticated) {
+                getFirebaseAuthOrNull(getApplication())?.currentUser?.displayName.orEmpty()
+            } else {
+                "Modo Local (Sem Conta)"
+            },
+            email = if (isCloudAuthenticated) {
+                getFirebaseAuthOrNull(getApplication())?.currentUser?.email.orEmpty()
+            } else {
+                "Sincronização em nuvem desativada"
+            }
         )
     )
 
     init {
         viewModelScope.launch {
-            conversationStateManager.ensureDefaultSessionExists()
-            offlineVoiceCommandRepository.ensureDefaultCommandsSeeded()
-            if (isCloudAuthenticated) {
-                Firebase.auth.currentUser?.let { user ->
-                    cloudRepository?.upsertUserProfile(user)
+            runCatching {
+                conversationStateManager.ensureDefaultSessionExists()
+                offlineVoiceCommandRepository.ensureDefaultCommandsSeeded()
+                if (isCloudAuthenticated) {
+                    getFirebaseAuthOrNull(getApplication())?.currentUser?.let { user ->
+                        cloudRepository?.upsertUserProfile(user)
+                    }
                 }
+            }.onFailure { err ->
+                Log.w("OpenJarvisVM", "Startup initialization warning: ${err.message}")
             }
         }
         viewModelScope.launch {
@@ -1050,7 +1061,7 @@ class OpenJarvisViewModel(
         var syncedCount = 0
         var hadError = false
         try {
-            Firebase.auth.currentUser?.let { user ->
+            getFirebaseAuthOrNull(getApplication())?.currentUser?.let { user ->
                 if (repo.upsertUserProfile(user).isFailure) hadError = true
             }
             val localMemories = database.memoryDao().getAllMemories()

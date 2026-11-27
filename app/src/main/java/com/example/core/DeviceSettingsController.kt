@@ -79,7 +79,7 @@ class DeviceSettingsController(context: Context) {
         }.getOrDefault(false)
     }
 
-    fun readSnapshot(): DeviceSettingsSnapshot {
+    fun readSnapshot(): DeviceSettingsSnapshot = runCatching {
         val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
         val curVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
         val volPct = ((curVol.toFloat() / maxVol) * 100f).roundToInt().coerceIn(0, 100)
@@ -111,7 +111,7 @@ class DeviceSettingsController(context: Context) {
             notificationManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
         }.getOrDefault(false)
 
-        return DeviceSettingsSnapshot(
+        DeviceSettingsSnapshot(
             canWriteSystemSettings = canWriteSystemSettings(),
             hasDndAccess = hasDndPolicyAccess(),
             hasBluetoothPermission = hasBluetoothPermission(),
@@ -125,7 +125,7 @@ class DeviceSettingsController(context: Context) {
             ringerModeLabel = ringerLabel,
             isDndEnabled = dndOn
         )
-    }
+    }.getOrDefault(DeviceSettingsSnapshot())
 
     fun openWriteSettingsPermission(): IntegrationResult {
         val intent = Intent(

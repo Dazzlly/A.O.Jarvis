@@ -43,7 +43,7 @@ class NetworkEngineManager(
 ) {
     private val appContext = context.applicationContext
     private val connectivityManager =
-        appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
     private val _state = MutableStateFlow(readCurrentNetworkSnapshot())
     val state: StateFlow<NetworkEngineState> = _state.asStateFlow()
@@ -67,7 +67,7 @@ class NetworkEngineManager(
 
     init {
         runCatching {
-            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            connectivityManager?.registerDefaultNetworkCallback(networkCallback)
         }.onFailure { err ->
             Log.w(TAG, "Unable to register default network callback: ${err.message}")
         }
@@ -316,8 +316,8 @@ class NetworkEngineManager(
         return host == "127.0.0.1" || host == "localhost" || host == "10.0.2.2"
     }
 
-    private fun readCurrentNetworkSnapshot(): NetworkEngineState {
-        val activeNetwork = connectivityManager.activeNetwork
+    private fun readCurrentNetworkSnapshot(): NetworkEngineState = runCatching {
+        val activeNetwork = connectivityManager?.activeNetwork
         val caps = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
 
         val hasWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
@@ -333,10 +333,17 @@ class NetworkEngineManager(
             else -> "Offline"
         }
 
-        return NetworkEngineState(
+        NetworkEngineState(
             isOnline = hasInternet || hasWifi || hasEthernet,
             isWifiConnected = hasWifi || hasEthernet,
             transportLabel = label,
+            localIpAddress = resolveLocalIpv4Address()
+        )
+    }.getOrElse {
+        NetworkEngineState(
+            isOnline = false,
+            isWifiConnected = false,
+            transportLabel = "Offline",
             localIpAddress = resolveLocalIpv4Address()
         )
     }

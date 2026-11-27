@@ -256,6 +256,8 @@ fun JarvisThemeBackdrop(
             .background(baseBg)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            if (size.width <= 0f || size.height <= 0f) return@Canvas
+            val maxDim = size.maxDimension.coerceAtLeast(1f)
             when (themeMode) {
                 AppThemeMode.TRON -> {
                     drawRect(
@@ -266,7 +268,7 @@ fun JarvisThemeBackdrop(
                                 Color.Transparent
                             ),
                             center = Offset(size.width * 0.5f, size.height * 0.06f),
-                            radius = size.maxDimension * 0.72f
+                            radius = (maxDim * 0.72f).coerceAtLeast(1f)
                         )
                     )
                     drawRect(
@@ -276,10 +278,10 @@ fun JarvisThemeBackdrop(
                                 Color.Transparent
                             ),
                             center = Offset(size.width * 0.92f, size.height * 0.88f),
-                            radius = size.maxDimension * 0.45f
+                            radius = (maxDim * 0.45f).coerceAtLeast(1f)
                         )
                     )
-                    val gridStep = 44.dp.toPx()
+                    val gridStep = 44.dp.toPx().coerceAtLeast(8f)
                     val lineColor = primaryGlow.copy(alpha = 0.055f)
                     val accentNodeColor = primaryGlow.copy(alpha = 0.12f)
                     var x = 0f
@@ -326,7 +328,7 @@ fun JarvisThemeBackdrop(
                                 Color.Transparent
                             ),
                             center = Offset(size.width * 0.85f, size.height * 0.08f),
-                            radius = size.maxDimension * 0.65f
+                            radius = (maxDim * 0.65f).coerceAtLeast(1f)
                         )
                     )
                     drawRect(
@@ -336,7 +338,7 @@ fun JarvisThemeBackdrop(
                                 Color.Transparent
                             ),
                             center = Offset(size.width * 0.12f, size.height * 0.86f),
-                            radius = size.maxDimension * 0.52f
+                            radius = (maxDim * 0.52f).coerceAtLeast(1f)
                         )
                     )
                 }
@@ -350,7 +352,7 @@ fun JarvisThemeBackdrop(
                                 Color.Transparent
                             ),
                             center = Offset(size.width * 0.5f, size.height * 0.07f),
-                            radius = size.maxDimension * 0.70f
+                            radius = (maxDim * 0.70f).coerceAtLeast(1f)
                         )
                     )
                 }
@@ -363,7 +365,7 @@ fun JarvisThemeBackdrop(
                                 Color.Transparent
                             ),
                             startY = 0f,
-                            endY = size.height * 0.35f
+                            endY = (size.height * 0.35f).coerceAtLeast(1f)
                         )
                     )
                 }

@@ -493,6 +493,8 @@ private fun ThemeMiniSwatch(
         modifier = Modifier.size(46.dp)
     ) {
         Canvas(modifier = Modifier.size(46.dp)) {
+            if (size.minDimension <= 1f) return@Canvas
+            val minDim = size.minDimension.coerceAtLeast(1f)
             val center = Offset(size.width / 2f, size.height / 2f)
             when (mode) {
                 AppThemeMode.TRON -> {
@@ -512,58 +514,60 @@ private fun ThemeMiniSwatch(
                         brush = Brush.radialGradient(
                             colors = listOf(primaryAccent.copy(alpha = 0.35f), Color.Transparent),
                             center = center,
-                            radius = size.minDimension * 0.46f
+                            radius = (minDim * 0.46f).coerceAtLeast(1f)
                         ),
-                        radius = size.minDimension * 0.46f,
+                        radius = minDim * 0.46f,
                         center = center
                     )
                     drawCircle(
                         color = primaryAccent,
-                        radius = size.minDimension * 0.34f,
+                        radius = minDim * 0.34f,
                         center = center,
                         style = Stroke(width = 2.4.dp.toPx())
                     )
                     drawCircle(
                         color = secondaryAccent,
-                        radius = size.minDimension * 0.14f,
+                        radius = minDim * 0.14f,
                         center = center,
                         style = Stroke(width = 1.6.dp.toPx())
                     )
                 }
 
                 AppThemeMode.OBSIDIAN -> {
+                    val minDim = size.minDimension.coerceAtLeast(1f)
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(primaryAccent.copy(alpha = 0.45f), Color.Transparent),
                             center = Offset(size.width * 0.68f, size.height * 0.34f),
-                            radius = size.minDimension * 0.48f
+                            radius = (minDim * 0.48f).coerceAtLeast(1f)
                         )
                     )
                     drawCircle(
                         color = primaryAccent,
-                        radius = size.minDimension * 0.22f,
+                        radius = minDim * 0.22f,
                         center = Offset(size.width * 0.40f, size.height * 0.46f)
                     )
                     drawCircle(
                         color = secondaryAccent,
-                        radius = size.minDimension * 0.14f,
+                        radius = minDim * 0.14f,
                         center = Offset(size.width * 0.66f, size.height * 0.64f)
                     )
                 }
 
                 AppThemeMode.CUSTOM -> {
+                    val minDim = size.minDimension.coerceAtLeast(1f)
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(primaryAccent.copy(alpha = 0.45f), Color.Transparent),
                             center = center,
-                            radius = size.minDimension * 0.48f
+                            radius = (minDim * 0.48f).coerceAtLeast(1f)
                         ),
-                        radius = size.minDimension * 0.48f,
+                        radius = minDim * 0.48f,
                         center = center
                     )
                     drawCircle(
                         color = primaryAccent,
-                        radius = size.minDimension * 0.28f,
+                        radius = minDim * 0.28f,
                         center = center
                     )
                 }

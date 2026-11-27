@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -12,9 +13,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -24,6 +27,7 @@ import com.example.ai.configureAppCheck
 import com.example.assistant.EXTRA_TRIGGERED_AS_ASSISTANT
 import com.example.cloud.JarvisCloudRepository
 import com.example.cloud.authStateFlow
+import com.example.cloud.getFirebaseAuthOrNull
 import com.example.data.AppThemeMode
 import com.example.data.JarvisSettings
 import com.example.ui.OpenJarvisApp
@@ -32,12 +36,13 @@ import com.example.ui.screens.AuthScreen
 import com.example.ui.theme.JarvisThemeBackdrop
 import com.example.ui.theme.OpenJarvisTheme
 import com.example.voice.JarvisRuntimeCoordinator
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+
+private const val MAIN_TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
 
@@ -48,15 +53,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // STEP 1: Configure Firebase App Check with launch intent before UI, ViewModels, or Firebase calls
-        configureAppCheck(this, intent)
+        runCatching { configureAppCheck(this, intent) }
+            .onFailure { Log.w(MAIN_TAG, "AppCheck init skipped: ${it.message}") }
 
         // STEP 2: Check if launched via Android Default Digital Assistant gesture / ACTION_ASSIST
         handleAssistantLaunchIntent(intent)
 
         // STEP 3: Enable Edge-to-Edge display
-        enableEdgeToEdge()
+        runCatching { enableEdgeToEdge() }
 
-        // STEP 4: Render auth-gated (with optional local Skip Step) Compose UI
+        // STEP 4: Render auth-gated (with optional local Skip Step & safe fallback) Compose UI
         setContent {
             val assistSignal by assistantLaunchSignal.collectAsState()
             AppAuthRoot(assistantLaunchSignal = assistSignal)
@@ -85,11 +91,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppAuthRoot(assistantLaunchSignal: Int) {
-    val auth = Firebase.auth
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val settingsDataStore = JarvisRuntimeCoordinator.getInstance(context.applicationContext).settingsDataStore
+    val auth = remember(context) { getFirebaseAuthOrNull(context) }
+    val authFlow = remember(auth) { auth?.authStateFlow() ?: flowOf(null) }
+    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = auth?.currentUser)
+
+    val settingsDataStore = remember(context) {
+        JarvisRuntimeCoordinator.getInstance(context.applicationContext).settingsDataStore
+    }
     val loadedSettings by settingsDataStore.settingsFlow
         .collectAsStateWithLifecycle(initialValue = null)
     val previewSettings = loadedSettings ?: JarvisSettings(themeMode = AppThemeMode.TRON)
@@ -107,12 +117,43 @@ private fun AppAuthRoot(assistantLaunchSignal: Int) {
                             val app = checkNotNull(this[APPLICATION_KEY]) {
                                 "APPLICATION_KEY missing from CreationExtras"
                             }
-                            val databaseId = app.getString(R.string.firestore_database_id)
-                            val firestore = FirebaseFirestore.getInstance(databaseId)
+                            val cloudRepo = runCatching {
+                                val databaseId = app.getString(R.string.firestore_database_id)
+                                val firestore = FirebaseFirestore.getInstance(databaseId)
+                                JarvisCloudRepository(firestore, auth!!)
+                            }.onFailure { err ->
+                                Log.w(MAIN_TAG, "Firestore unavailable, running with local persistence: ${err.message}")
+                            }.getOrNull()
                             OpenJarvisViewModel(
                                 application = app,
-                                currentUserId = uid,
-                                cloudRepository = JarvisCloudRepository(firestore)
+                                currentUserId = if (cloudRepo != null) uid else null,
+                                cloudRepository = cloudRepo
+                            )
+                        }
+                    }
+                )
+                OpenJarvisApp(
+                    viewModel = viewModel,
+                    assistantLaunchSignal = assistantLaunchSignal
+                )
+            }
+        }
+
+        // If Firebase isn't initialized in this APK build (e.g. CI build without google-services.json),
+        // seamlessly launch in local/offline mode instead of crashing on startup.
+        auth == null -> {
+            key("guest_local_mode_no_firebase") {
+                val viewModel: OpenJarvisViewModel = viewModel(
+                    key = "guest_local_mode_no_firebase",
+                    factory = viewModelFactory {
+                        initializer {
+                            val app = checkNotNull(this[APPLICATION_KEY]) {
+                                "APPLICATION_KEY missing from CreationExtras"
+                            }
+                            OpenJarvisViewModel(
+                                application = app,
+                                currentUserId = null,
+                                cloudRepository = null
                             )
                         }
                     }

@@ -117,7 +117,9 @@ fun OpenJarvisApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
-    val credentialManager = remember(context) { CredentialManager.create(context) }
+    val credentialManager = remember(context) {
+        runCatching { CredentialManager.create(context) }.getOrNull()
+    }
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val activeSessionId by viewModel.activeSessionId.collectAsStateWithLifecycle()
@@ -422,7 +424,7 @@ fun OpenJarvisApp(
             autoPermissionsPrompted = true
             val missing = PermissionsManager.missingPermissions(context)
             if (missing.isNotEmpty()) {
-                permissionsLauncher.launch(missing)
+                runCatching { permissionsLauncher.launch(missing) }
             }
         }
     }
@@ -902,6 +904,7 @@ fun OpenJarvisApp(
                                     onSignOutGoogle = {
                                         viewModel.updateSkipAccountSignIn(false)
                                         signOutWithCredentialClear(
+                                            context = context,
                                             credentialManager = credentialManager,
                                             scope = scope,
                                             onSignOutComplete = {

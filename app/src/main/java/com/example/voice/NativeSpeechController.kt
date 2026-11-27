@@ -185,12 +185,13 @@ class NativeSpeechController(private val context: Context) {
     }
 
     private fun initTtsEngine() {
-        tts = TextToSpeech(appContext) { status ->
-            mainHandler.post {
-                if (status == TextToSpeech.SUCCESS) {
-                    val engine = tts ?: return@post
-                    loadAvailableVoices(engine)
-                    configureTtsAudioAndLocale(engine, "pt-BR")
+        tts = runCatching {
+            TextToSpeech(appContext) { status ->
+                mainHandler.post {
+                    if (status == TextToSpeech.SUCCESS) {
+                        val engine = tts ?: return@post
+                        runCatching { loadAvailableVoices(engine) }
+                        runCatching { configureTtsAudioAndLocale(engine, "pt-BR") }
                     engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) {
                             _isSpeaking.value = true
@@ -237,6 +238,11 @@ class NativeSpeechController(private val context: Context) {
                 }
             }
         }
+        }.onFailure { err ->
+            ttsReady = false
+            _ttsStatus.value = TtsStatus.Error("Motor TTS indisponível: ${err.localizedMessage ?: err.javaClass.simpleName}")
+            Log.w(TAG, "Failed to construct TextToSpeech", err)
+        }.getOrNull()
     }
 
     private fun loadAvailableVoices(engine: TextToSpeech) {

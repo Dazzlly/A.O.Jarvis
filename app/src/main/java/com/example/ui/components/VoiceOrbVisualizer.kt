@@ -80,8 +80,9 @@ fun VoiceOrbVisualizer(
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.matchParentSize()) {
-            val center = Offset(this.size.width / 2f, this.size.height / 2f)
             val maxRadius = this.size.minDimension / 2f
+            if (maxRadius <= 1f) return@Canvas
+            val center = Offset(this.size.width / 2f, this.size.height / 2f)
 
             // Ambient radial halo
             drawCircle(
@@ -92,7 +93,7 @@ fun VoiceOrbVisualizer(
                         Color.Transparent
                     ),
                     center = center,
-                    radius = maxRadius * (0.85f + animatedRms * 0.18f)
+                    radius = (maxRadius * (0.85f + animatedRms * 0.18f)).coerceAtLeast(1f)
                 ),
                 radius = maxRadius,
                 center = center
@@ -103,7 +104,7 @@ fun VoiceOrbVisualizer(
             for (i in 0 until ringCount) {
                 val factor = 0.52f + i * 0.16f + (if (isActive) animatedRms * 0.08f else 0f)
                 val wave = if (isActive) sin(phase + i * 1.1f) * 4.dp.toPx() else (idleBreath - 1f) * 6.dp.toPx()
-                val ringRadius = (maxRadius * factor + wave).coerceAtMost(maxRadius - 2.dp.toPx())
+                val ringRadius = (maxRadius * factor + wave).coerceIn(1f, (maxRadius - 2.dp.toPx()).coerceAtLeast(1f))
                 val alpha = if (isActive) (0.72f - i * 0.2f) else (0.30f - i * 0.08f)
 
                 drawCircle(
@@ -139,9 +140,9 @@ fun VoiceOrbVisualizer(
                         accentColor.copy(alpha = 0.08f)
                     ),
                     center = center,
-                    radius = maxRadius * 0.46f
+                    radius = (maxRadius * 0.46f).coerceAtLeast(1f)
                 ),
-                radius = maxRadius * 0.44f * idleBreath,
+                radius = (maxRadius * 0.44f * idleBreath).coerceAtLeast(1f),
                 center = center
             )
         }

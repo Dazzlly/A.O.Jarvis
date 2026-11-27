@@ -1,0 +1,4 @@
+- v1.3.2 (build 6):
+- Correção crítica do fechamento imediato ao abrir o aplicativo: proteção completa na inicialização do Firebase Auth/App Check/Firestore com fallback automático para modo local quando compilado sem google-services.json.
+- Proteção contra falhas de renderização Canvas/RadialGradient no primeiro frame em dispositivos Android 14/15/16 e blindagem das leituras iniciais de rede, TTS e configurações do sistema.
+- Nome do repositório F-Droid simplificado para "A.O.Jarvis" (removido o sufixo "Repo").
