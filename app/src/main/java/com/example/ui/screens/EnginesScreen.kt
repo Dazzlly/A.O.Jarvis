@@ -91,6 +91,7 @@ import com.example.engine.OllamaHealthStatus
 import com.example.ui.theme.LocalAppThemeMode
 import com.example.voice.LanServerState
 import com.example.voice.TtsStatus
+import com.example.voice.WakeWordDetectorState
 import java.util.Locale
 
 private data class GeminiModelPreset(
@@ -134,6 +135,7 @@ fun EnginesScreen(
     settings: JarvisSettings,
     networkState: NetworkEngineState,
     lanServerState: LanServerState,
+    wakeWordState: WakeWordDetectorState,
     ttsStatus: TtsStatus,
     isTtsSpeaking: Boolean,
     permissionItems: List<AutonomyPermissionItem>,
@@ -158,6 +160,7 @@ fun EnginesScreen(
     onUpdateTemperature: (Float) -> Unit,
     onUpdateSystemPrompt: (String) -> Unit,
     onUpdateVoicePreferences: (Boolean, String, Boolean, Boolean) -> Unit,
+    onUpdateAudioRecordWakeWordConfig: (Boolean, Float) -> Unit,
     onUpdateBackgroundModePreferences: (Boolean, Boolean) -> Unit,
     onUpdateLanTriggerConfig: (Boolean, Int) -> Unit,
     onRegenerateLanToken: () -> Unit,
@@ -714,7 +717,7 @@ fun EnginesScreen(
                         OutlinedTextField(
                             value = wakeWordDraft,
                             onValueChange = { wakeWordDraft = it },
-                            label = { Text("Palavra de ativação") },
+                            label = { Text("Palavra de ativação (ex: hey jarvis)") },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
@@ -732,6 +735,53 @@ fun EnginesScreen(
                             Text("Salvar")
                         }
                     }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                TogglePreferenceRow(
+                    title = stringResource(R.string.wake_word_audiorecord_title),
+                    subtitle = stringResource(R.string.wake_word_audiorecord_subtitle),
+                    checked = settings.audioRecordWakeWordEnabled,
+                    onCheckedChange = { enabled ->
+                        onUpdateAudioRecordWakeWordConfig(enabled, settings.wakeWordSensitivity)
+                    },
+                    testTag = "switch_audiorecord_wake_word"
+                )
+
+                if (settings.audioRecordWakeWordEnabled) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val sensLabel = when {
+                        settings.wakeWordSensitivity >= 0.85f -> "Máxima"
+                        settings.wakeWordSensitivity >= 0.6f -> "Equilibrada"
+                        settings.wakeWordSensitivity >= 0.4f -> "Moderada"
+                        else -> "Rigorosa"
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Sensibilidade AudioRecord (${(settings.wakeWordSensitivity * 100).toInt()}%)",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Text(
+                            text = sensLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Slider(
+                        value = settings.wakeWordSensitivity,
+                        onValueChange = { onUpdateAudioRecordWakeWordConfig(true, it) },
+                        valueRange = 0.2f..1.0f,
+                        modifier = Modifier.testTag("wake_word_sensitivity_slider")
+                    )
+                    Text(
+                        text = "${wakeWordState.statusText} · Ruído ambiente: ${wakeWordState.noiseFloorDb.toInt()} dBFS · Ativações: ${wakeWordState.triggerCount}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))

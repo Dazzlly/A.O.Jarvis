@@ -57,13 +57,16 @@ import com.example.engine.OllamaHealthStatus
 import com.example.state.AssistantPhase
 import com.example.state.AssistantState
 import com.example.state.CommandSource
+import com.example.voice.AudioRecordWakeWordDetector
 import com.example.voice.JarvisRuntimeCoordinator
 import com.example.voice.LanServerState
 import com.example.voice.TtsStatus
 import com.example.voice.TtsVoiceOption
 import com.example.voice.VoiceRuntimeState
+import com.example.voice.WakeWordDetectorState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -108,6 +111,7 @@ class OpenJarvisViewModel(
     private val screenVisionManager = coordinator.screenVisionManager
     private val selfEvolutionManager = coordinator.selfEvolutionManager
     private val batteryOptimizationManager = coordinator.batteryOptimizationManager
+    private val wakeWordDetector = coordinator.wakeWordDetector
     private val defaultAssistantManager = DefaultAssistantManager(application.applicationContext)
 
     private val _defaultAssistantStatus = MutableStateFlow(defaultAssistantManager.readStatus())
@@ -320,6 +324,7 @@ class OpenJarvisViewModel(
     val networkState: StateFlow<NetworkEngineState> = networkEngineManager.state
     val lanServerState: StateFlow<LanServerState> = coordinator.lanServerState
     val voiceState: StateFlow<VoiceRuntimeState> = coordinator.voiceState
+    val wakeWordState: StateFlow<WakeWordDetectorState> = coordinator.wakeWordState
     val liveVoiceState: StateFlow<LiveVoiceState> = coordinator.geminiLiveManager.state
     val ttsStatus: StateFlow<TtsStatus> = speechController.ttsStatus
     val availableTtsVoices: StateFlow<List<TtsVoiceOption>> = speechController.availableVoices
@@ -359,6 +364,10 @@ class OpenJarvisViewModel(
     val isProbingOllama: StateFlow<Boolean> = _isProbingOllama.asStateFlow()
 
     private var promptJob: Job? = null
+    private var foregroundWakeResumeJob: Job? = null
+    private var isAppInForeground: Boolean = true
+    private var isNativeConsoleActive: Boolean = true
+    private var isVerifyingForegroundWakeWord: Boolean = false
 
     fun sendPrompt(
         prompt: String,
@@ -434,12 +443,16 @@ class OpenJarvisViewModel(
                 if (_streamingState.value is StreamingUiState.Streaming) {
                     _streamingState.value = StreamingUiState.Idle
                 }
+                if (!voiceState.value.isSpeaking && !isTtsSpeaking.value) {
+                    scheduleForegroundWakeWordResume(delayMs = 500L)
+                }
             }
         }
     }
 
     fun speakText(text: String) {
         if (text.isBlank()) return
+        pauseForegroundWakeWord("A.O.Jarvis falando…")
         conversationStateManager.updatePhase(AssistantPhase.Speaking(text.take(60)))
         coordinator.updateVoiceState {
             it.copy(isSpeaking = true, statusText = "A.O.Jarvis falando…")
@@ -449,6 +462,7 @@ class OpenJarvisViewModel(
             coordinator.updateVoiceState {
                 it.copy(isSpeaking = false, statusText = "Pronto para escutar")
             }
+            scheduleForegroundWakeWordResume(delayMs = 450L)
         }
     }
 
@@ -458,6 +472,7 @@ class OpenJarvisViewModel(
         coordinator.updateVoiceState {
             it.copy(isSpeaking = false, statusText = "Pronto para escutar")
         }
+        scheduleForegroundWakeWordResume(delayMs = 350L)
     }
 
     fun testTtsVoice() {
@@ -575,6 +590,148 @@ class OpenJarvisViewModel(
         stopSpeaking()
     }
 
+    fun syncForegroundWakeWordMonitoring(
+        appInForeground: Boolean,
+        isNativeConsoleMode: Boolean
+    ) {
+        isAppInForeground = appInForeground
+        isNativeConsoleActive = isNativeConsoleMode
+        evaluateForegroundWakeWordState()
+    }
+
+    private fun pauseForegroundWakeWord(reason: String? = null) {
+        foregroundWakeResumeJob?.cancel()
+        isVerifyingForegroundWakeWord = false
+        if (!voiceState.value.isBackgroundRunning) {
+            wakeWordDetector.stopMonitoring(reason)
+        }
+    }
+
+    private fun scheduleForegroundWakeWordResume(delayMs: Long = 400L) {
+        foregroundWakeResumeJob?.cancel()
+        foregroundWakeResumeJob = viewModelScope.launch {
+            delay(delayMs)
+            evaluateForegroundWakeWordState()
+        }
+    }
+
+    private fun evaluateForegroundWakeWordState() {
+        val currentSettings = settings.value
+        val vState = voiceState.value
+        val liveState = liveVoiceState.value
+        val shouldMonitor = isAppInForeground &&
+            isNativeConsoleActive &&
+            currentSettings.audioRecordWakeWordEnabled &&
+            !vState.isBackgroundRunning &&
+            !vState.isListening &&
+            !vState.isSpeaking &&
+            !vState.isProcessingVoice &&
+            !isTtsSpeaking.value &&
+            !isVerifyingForegroundWakeWord &&
+            liveState !is LiveVoiceState.Active &&
+            liveState !is LiveVoiceState.Connecting
+
+        if (shouldMonitor) {
+            wakeWordDetector.startMonitoring(
+                phrase = currentSettings.wakeWord,
+                sensitivityLevel = currentSettings.wakeWordSensitivity,
+                onCandidateDetected = {
+                    viewModelScope.launch {
+                        handleForegroundWakeWordCandidate()
+                    }
+                }
+            )
+        } else if (!vState.isBackgroundRunning && !isVerifyingForegroundWakeWord) {
+            val reason = when {
+                !currentSettings.audioRecordWakeWordEnabled -> "Detecção \"Hey Jarvis\" desativada"
+                vState.isListening -> "Ouvindo comando…"
+                vState.isSpeaking || isTtsSpeaking.value -> "A.O.Jarvis falando…"
+                else -> "Standby AudioRecord pausado"
+            }
+            wakeWordDetector.stopMonitoring(reason)
+        }
+    }
+
+    private fun handleForegroundWakeWordCandidate() {
+        val currentSettings = settings.value
+        if (!isAppInForeground ||
+            !isNativeConsoleActive ||
+            !currentSettings.audioRecordWakeWordEnabled ||
+            voiceState.value.isBackgroundRunning ||
+            voiceState.value.isListening ||
+            isTtsSpeaking.value
+        ) {
+            wakeWordDetector.setVerifyingPhrase(false)
+            return
+        }
+
+        isVerifyingForegroundWakeWord = true
+        wakeWordDetector.setVerifyingPhrase(true, "Confirmando \"${currentSettings.wakeWord}\"…")
+        var capturedConfidence = -1f
+        var alreadyTriggered = false
+
+        speechController.startListening(
+            preferOffline = currentSettings.preferOfflineStt,
+            onPartial = { partial ->
+                if (alreadyTriggered) return@startListening
+                val match = AudioRecordWakeWordDetector.matchWakePhrase(partial, currentSettings.wakeWord)
+                if (match.matched && match.inlineCommand.isBlank()) {
+                    // Immediate hands-free wake on "Hey Jarvis" partial recognition without waiting for long timeout
+                    alreadyTriggered = true
+                    speechController.stopListening()
+                    onForegroundWakeWordConfirmed(rawTranscript = partial, inlineCommand = "", confidence = capturedConfidence)
+                }
+            },
+            onFinal = { transcript ->
+                if (alreadyTriggered) return@startListening
+                val match = AudioRecordWakeWordDetector.matchWakePhrase(transcript, currentSettings.wakeWord)
+                if (match.matched) {
+                    alreadyTriggered = true
+                    onForegroundWakeWordConfirmed(
+                        rawTranscript = transcript,
+                        inlineCommand = match.inlineCommand,
+                        confidence = capturedConfidence
+                    )
+                } else {
+                    isVerifyingForegroundWakeWord = false
+                    wakeWordDetector.setVerifyingPhrase(false)
+                    scheduleForegroundWakeWordResume(delayMs = 350L)
+                }
+            },
+            onConfidence = { conf ->
+                capturedConfidence = conf
+            },
+            onError = { _, _ ->
+                if (alreadyTriggered) return@startListening
+                isVerifyingForegroundWakeWord = false
+                wakeWordDetector.setVerifyingPhrase(false)
+                scheduleForegroundWakeWordResume(delayMs = 450L)
+            }
+        )
+    }
+
+    private fun onForegroundWakeWordConfirmed(
+        rawTranscript: String,
+        inlineCommand: String,
+        confidence: Float
+    ) {
+        isVerifyingForegroundWakeWord = false
+        wakeWordDetector.recordSuccessfulDetection(rawTranscript)
+        val currentSettings = settings.value
+
+        if (inlineCommand.isNotBlank()) {
+            sendPrompt(
+                prompt = inlineCommand,
+                sourceTag = CommandSource.VOICE_STT.tag,
+                speakReply = currentSettings.autoSpeakResponses,
+                sttConfidence = confidence
+            )
+        } else {
+            // Automatically activate full assistant command listening hands-free!
+            startDirectVoiceListening(triggeredByWakeWord = true)
+        }
+    }
+
     fun onMicButtonClicked() {
         val vState = voiceState.value
         if (vState.isBackgroundRunning) {
@@ -588,20 +745,30 @@ class OpenJarvisViewModel(
             coordinator.updateVoiceState {
                 it.copy(isListening = false, rmsDb = 0f, partialTranscript = "", statusText = "Escuta parada")
             }
+            scheduleForegroundWakeWordResume(delayMs = 450L)
             return
         }
 
+        startDirectVoiceListening(triggeredByWakeWord = false)
+    }
+
+    private fun startDirectVoiceListening(triggeredByWakeWord: Boolean) {
+        pauseForegroundWakeWord(if (triggeredByWakeWord) "Ativado por \"Hey Jarvis\"" else "Microfone manual ativo")
         stopLiveSession()
         speechController.stopSpeaking()
         val currentSettings = settings.value
-        conversationStateManager.updatePhase(AssistantPhase.ListeningCommand(isFollowUp = false))
+        conversationStateManager.updatePhase(AssistantPhase.ListeningCommand(isFollowUp = triggeredByWakeWord))
         coordinator.updateVoiceState {
             it.copy(
                 isListening = true,
                 isSpeaking = false,
                 errorMessage = null,
                 partialTranscript = "",
-                statusText = if (currentSettings.preferOfflineStt) "Ouvindo (STT Offline pref.)…" else "Ouvindo (STT Nativo)…"
+                statusText = when {
+                    triggeredByWakeWord -> "Hey Jarvis ativado — pode falar!"
+                    currentSettings.preferOfflineStt -> "Ouvindo (STT Offline pref.)…"
+                    else -> "Ouvindo (STT Nativo)…"
+                }
             )
         }
 
@@ -654,6 +821,7 @@ class OpenJarvisViewModel(
                         errorMessage = displayError
                     )
                 }
+                scheduleForegroundWakeWordResume(delayMs = 500L)
             }
         )
     }
@@ -661,7 +829,9 @@ class OpenJarvisViewModel(
     fun toggleBackgroundService() {
         if (voiceState.value.isBackgroundRunning) {
             coordinator.stopBackgroundService(getApplication())
+            scheduleForegroundWakeWordResume(delayMs = 600L)
         } else {
+            pauseForegroundWakeWord("Transferindo escuta para serviço em 2º plano")
             stopLiveSession()
             speechController.stopListening()
             speechController.stopSpeaking()
@@ -671,6 +841,7 @@ class OpenJarvisViewModel(
 
     fun startBackgroundServiceExplicitly() {
         if (!voiceState.value.isBackgroundRunning) {
+            pauseForegroundWakeWord("Transferindo escuta para serviço em 2º plano")
             stopLiveSession()
             speechController.stopListening()
             speechController.stopSpeaking()
@@ -681,10 +852,12 @@ class OpenJarvisViewModel(
     fun stopBackgroundServiceExplicitly() {
         if (voiceState.value.isBackgroundRunning) {
             coordinator.stopBackgroundService(getApplication())
+            scheduleForegroundWakeWordResume(delayMs = 600L)
         }
     }
 
     fun startLiveSession() {
+        pauseForegroundWakeWord("Gemini Live ativo")
         if (voiceState.value.isBackgroundRunning) {
             coordinator.stopBackgroundService(getApplication())
         }
@@ -699,6 +872,7 @@ class OpenJarvisViewModel(
                 viewModelScope.launch {
                     orchestrator.recordLiveTrace(durationMs, currentSettings.liveVoiceName, error)
                 }
+                scheduleForegroundWakeWordResume(delayMs = 500L)
             }
         )
     }
@@ -976,6 +1150,31 @@ class OpenJarvisViewModel(
             preferOfflineStt = preferOfflineStt,
             autoSpeakResponses = autoSpeakResponses
         )
+        wakeWordDetector.updateParameters(wakeWord, settings.value.wakeWordSensitivity)
+    }
+
+    fun updateAudioRecordWakeWordConfig(
+        enabled: Boolean,
+        sensitivity: Float
+    ) = viewModelScope.launch {
+        settingsDataStore.updateAudioRecordWakeWordConfig(
+            enabled = enabled,
+            sensitivity = sensitivity
+        )
+        wakeWordDetector.updateParameters(settings.value.wakeWord, sensitivity)
+        if (!enabled && !voiceState.value.isBackgroundRunning) {
+            wakeWordDetector.stopMonitoring("Detecção \"Hey Jarvis\" desativada")
+        } else {
+            scheduleForegroundWakeWordResume(delayMs = 200L)
+        }
+    }
+
+    fun toggleAudioRecordWakeWord() {
+        val current = settings.value
+        updateAudioRecordWakeWordConfig(
+            enabled = !current.audioRecordWakeWordEnabled,
+            sensitivity = current.wakeWordSensitivity
+        )
     }
 
     fun updateBackgroundModePreferences(
@@ -1227,7 +1426,9 @@ class OpenJarvisViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        foregroundWakeResumeJob?.cancel()
         if (!voiceState.value.isBackgroundRunning) {
+            wakeWordDetector.stopMonitoring()
             speechController.stopListening()
         }
         speechController.stopSpeaking()

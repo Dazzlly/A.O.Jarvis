@@ -110,10 +110,12 @@ import com.example.ui.components.EngineBadge
 import com.example.ui.components.TronPulseHaloBox
 import com.example.ui.components.VoiceOrbVisualizer
 import com.example.ui.components.VoiceWaveformVisualizer
+import com.example.ui.components.WakeWordHandsFreeStrip
 import com.example.ui.components.rememberTronPulseState
 import com.example.vision.ScreenShareState
 import com.example.voice.LanServerState
 import com.example.voice.VoiceRuntimeState
+import com.example.voice.WakeWordDetectorState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -128,6 +130,7 @@ fun ConsoleScreen(
     networkState: NetworkEngineState,
     lanServerState: LanServerState,
     voiceState: VoiceRuntimeState,
+    wakeWordState: WakeWordDetectorState,
     liveVoiceState: LiveVoiceState,
     screenShareState: ScreenShareState,
     batteryStatus: BatteryStatusSnapshot,
@@ -147,6 +150,7 @@ fun ConsoleScreen(
     onStopSpeaking: () -> Unit,
     onStartGuidedTour: () -> Unit,
     onMicClick: () -> Unit,
+    onToggleWakeWord: () -> Unit,
     onToggleBackground: () -> Unit,
     onToggleScreenShare: () -> Unit,
     onAnalyzeScreenNow: () -> Unit,
@@ -163,6 +167,7 @@ fun ConsoleScreen(
     var inputText by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val isActivelyListening = voiceState.isListening ||
+        wakeWordState.isVerifyingPhrase ||
         liveVoiceState is LiveVoiceState.Active ||
         liveVoiceState is LiveVoiceState.Connecting ||
         (voiceState.isBackgroundRunning && !voiceState.isBackgroundPaused)
@@ -304,6 +309,17 @@ fun ConsoleScreen(
                 onSelectSession = onSelectSession,
                 onCreateNewSession = onCreateNewSession,
                 onDeleteSession = onDeleteSession
+            )
+
+            // Lightweight Android AudioRecord "Hey Jarvis" Hands-Free Detector Strip
+            WakeWordHandsFreeStrip(
+                wakeWordState = wakeWordState,
+                enabled = settings.audioRecordWakeWordEnabled,
+                wakePhrase = settings.wakeWord,
+                hasMicPermission = hasMicPermission,
+                onToggle = {
+                    if (!hasMicPermission) onRequestMicPermission() else onToggleWakeWord()
+                }
             )
 
             // Native Voice STT + Multi-Engine Streaming Console

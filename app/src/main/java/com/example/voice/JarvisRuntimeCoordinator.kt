@@ -71,6 +71,8 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
 
     val settingsDataStore: SettingsDataStore = SettingsDataStore(appContext)
     val speechController: NativeSpeechController = NativeSpeechController(appContext)
+    val wakeWordDetector: AudioRecordWakeWordDetector = AudioRecordWakeWordDetector(appContext)
+    val wakeWordState: StateFlow<WakeWordDetectorState> = wakeWordDetector.state
     val batteryOptimizationManager: BatteryOptimizationManager = BatteryOptimizationManager(appContext)
     val integrationManager: AppIntegrationManager = AppIntegrationManager(appContext)
     val appSelfController: AppSelfController = AppSelfController(appContext)

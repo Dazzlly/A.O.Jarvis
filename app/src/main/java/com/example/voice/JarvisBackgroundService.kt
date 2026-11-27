@@ -107,6 +107,7 @@ class JarvisBackgroundService : Service() {
                 awaitingDirectCommand = true
                 followUpSilenceRetries = 0
                 if (voiceEnabledInService) {
+                    coordinator.wakeWordDetector.stopMonitoring("Escuta direta iniciada")
                     acquireWakeLock()
                     speechController.stopSpeaking()
                     scheduleNextListen(delayMs = 150L)
@@ -235,6 +236,7 @@ class JarvisBackgroundService : Service() {
         // Manage continuous voice listening loop
         if (!canUseMic) {
             restartJob?.cancel()
+            coordinator.wakeWordDetector.stopMonitoring()
             speechController.stopListening()
             awaitingDirectCommand = false
             val lanInfo = lanServer.state.value
@@ -268,7 +270,8 @@ class JarvisBackgroundService : Service() {
             updateNotification(status)
         } else if (!isPaused && !coordinator.voiceState.value.isListening &&
             !coordinator.voiceState.value.isProcessingVoice &&
-            !coordinator.voiceState.value.isSpeaking
+            !coordinator.voiceState.value.isSpeaking &&
+            !coordinator.wakeWordDetector.state.value.isMonitoring
         ) {
             acquireWakeLock()
             scheduleNextListen(delayMs = 250L)
@@ -279,6 +282,7 @@ class JarvisBackgroundService : Service() {
         isPaused = true
         releaseWakeLock()
         restartJob?.cancel()
+        coordinator.wakeWordDetector.stopMonitoring("Escuta contínua pausada")
         speechController.stopListening()
         speechController.stopSpeaking()
         awaitingDirectCommand = false
@@ -346,9 +350,46 @@ class JarvisBackgroundService : Service() {
 
         val settings = coordinator.settingsDataStore.settingsFlow.first()
         val lanSuffix = if (lanServer.state.value.isRunning) " · LAN :${lanServer.state.value.port}" else ""
+
+        // Lightweight Stage-1 standby using Android AudioRecord PCM VAD when waiting for "Hey Jarvis"
+        if (settings.wakeWordEnabled && settings.audioRecordWakeWordEnabled && !awaitingDirectCommand) {
+            val wakeLabel = "AudioRecord · Aguardando \"${settings.wakeWord}\"$lanSuffix"
+            coordinator.conversationStateManager.updatePhase(
+                phase = AssistantPhase.ListeningWakeWord(settings.wakeWord),
+                followUpWindowActive = false
+            )
+            coordinator.updateVoiceState {
+                it.copy(
+                    isListening = false,
+                    isSpeaking = false,
+                    partialTranscript = "",
+                    statusText = wakeLabel,
+                    awaitingFollowUpCommand = false
+                )
+            }
+            updateNotification(wakeLabel)
+            coordinator.wakeWordDetector.startMonitoring(
+                phrase = settings.wakeWord,
+                sensitivityLevel = settings.wakeWordSensitivity,
+                onCandidateDetected = {
+                    serviceScope.launch {
+                        if (!isPaused && voiceEnabledInService) {
+                            beginSpeechRecognizerSession(settings, lanSuffix)
+                        }
+                    }
+                }
+            )
+            return
+        }
+
+        beginSpeechRecognizerSession(settings, lanSuffix)
+    }
+
+    private fun beginSpeechRecognizerSession(settings: JarvisSettings, lanSuffix: String) {
+        coordinator.wakeWordDetector.stopMonitoring()
         val label = when {
             awaitingDirectCommand -> "Conversa contínua — pode falar$lanSuffix"
-            settings.wakeWordEnabled -> "Aguardando \"${settings.wakeWord}\"$lanSuffix"
+            settings.wakeWordEnabled -> "Confirmando \"${settings.wakeWord}\"$lanSuffix"
             else -> "Ouvindo comando de voz$lanSuffix"
         }
 
@@ -488,15 +529,13 @@ class JarvisBackgroundService : Service() {
                 }
 
                 val promptToExecute: String? = if (settings.wakeWordEnabled && !awaitingDirectCommand) {
-                    val wake = normalize(settings.wakeWord).ifBlank { "jarvis" }
-                    val idx = normalized.indexOf(wake)
-                    if (idx < 0) {
+                    val wakeMatch = AudioRecordWakeWordDetector.matchWakePhrase(rawTranscript, settings.wakeWord)
+                    if (!wakeMatch.matched) {
+                        coordinator.wakeWordDetector.setVerifyingPhrase(false)
                         null
                     } else {
-                        val afterWake = rawTranscript
-                            .drop((idx + wake.length).coerceAtMost(rawTranscript.length))
-                            .trimStart(',', '.', ':', ' ', '-', '!')
-                            .trim()
+                        coordinator.wakeWordDetector.recordSuccessfulDetection(rawTranscript)
+                        val afterWake = wakeMatch.inlineCommand
                         if (afterWake.isEmpty()) {
                             awaitingDirectCommand = true
                             followUpSilenceRetries = 0
@@ -661,6 +700,7 @@ class JarvisBackgroundService : Service() {
                 val wasListening = voiceEnabledInService && !isPaused
                 serviceScope.launch {
                     restartJob?.cancel()
+                    coordinator.wakeWordDetector.stopMonitoring()
                     speechController.stopListening()
                     coordinator.updateVoiceState {
                         it.copy(
@@ -801,6 +841,7 @@ class JarvisBackgroundService : Service() {
         restartJob?.cancel()
         dispatchJob?.cancel()
         lanServer.stop()
+        coordinator.wakeWordDetector.stopMonitoring("Serviço em segundo plano encerrado")
         speechController.stopListening()
         speechController.stopSpeaking()
         coordinator.conversationStateManager.updatePhase(AssistantPhase.Idle, followUpWindowActive = false)
@@ -913,6 +954,7 @@ class JarvisBackgroundService : Service() {
         restartJob?.cancel()
         dispatchJob?.cancel()
         lanServer.destroy()
+        coordinator.wakeWordDetector.stopMonitoring("Serviço em segundo plano encerrado")
         speechController.stopListening()
         speechController.stopSpeaking()
         serviceScope.cancel()

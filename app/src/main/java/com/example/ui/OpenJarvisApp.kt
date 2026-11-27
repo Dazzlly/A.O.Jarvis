@@ -132,6 +132,7 @@ fun OpenJarvisApp(
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val lanServerState by viewModel.lanServerState.collectAsStateWithLifecycle()
     val voiceState by viewModel.voiceState.collectAsStateWithLifecycle()
+    val wakeWordState by viewModel.wakeWordState.collectAsStateWithLifecycle()
     val liveVoiceState by viewModel.liveVoiceState.collectAsStateWithLifecycle()
     val ttsStatus by viewModel.ttsStatus.collectAsStateWithLifecycle()
     val availableTtsVoices by viewModel.availableTtsVoices.collectAsStateWithLifecycle()
@@ -155,6 +156,7 @@ fun OpenJarvisApp(
     var showTtsSettingsScreen by rememberSaveable { mutableStateOf(false) }
     var showBatteryOptPromptDialog by rememberSaveable { mutableStateOf(false) }
     var batteryBannerDismissed by rememberSaveable { mutableStateOf(false) }
+    var isLifecycleResumed by remember { mutableStateOf(true) }
     var selectedConsoleMode by rememberSaveable { mutableIntStateOf(0) } // 0 = Native STT & Chat, 1 = Gemini Live
     var selectedToolsTab by rememberSaveable { mutableIntStateOf(0) } // 0 = Comandos, 1 = Memórias, 2 = Auto-Dev
     var selfEvolutionDraft by rememberSaveable { mutableStateOf("") }
@@ -275,17 +277,47 @@ fun OpenJarvisApp(
         }
     }
 
-    // Auto-refresh Default Assistant, Battery Optimization & Device Settings on resume
+    // Auto-refresh Default Assistant, Battery Optimization, Device Settings & AudioRecord Wake-Word lifecycle
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.refreshDefaultAssistantStatus()
-                viewModel.refreshBatteryOptimizationStatus()
-                viewModel.refreshDeviceSettings()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    isLifecycleResumed = true
+                    viewModel.refreshDefaultAssistantStatus()
+                    viewModel.refreshBatteryOptimizationStatus()
+                    viewModel.refreshDeviceSettings()
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    isLifecycleResumed = false
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            isLifecycleResumed = false
+            viewModel.syncForegroundWakeWordMonitoring(appInForeground = false, isNativeConsoleMode = false)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(
+        isLifecycleResumed,
+        hasMicPermission,
+        currentTab,
+        selectedConsoleMode,
+        showTtsSettingsScreen,
+        settings.audioRecordWakeWordEnabled,
+        settings.wakeWord,
+        settings.wakeWordSensitivity,
+        voiceState.isBackgroundRunning
+    ) {
+        viewModel.syncForegroundWakeWordMonitoring(
+            appInForeground = isLifecycleResumed && hasMicPermission,
+            isNativeConsoleMode = !showTtsSettingsScreen &&
+                currentTab == JarvisTab.CONSOLE &&
+                selectedConsoleMode == 0
+        )
     }
 
     fun requestAllAutonomyPermissions() {
@@ -681,6 +713,7 @@ fun OpenJarvisApp(
                                     networkState = networkState,
                                     lanServerState = lanServerState,
                                     voiceState = voiceState,
+                                    wakeWordState = wakeWordState,
                                     liveVoiceState = liveVoiceState,
                                     screenShareState = screenShareState,
                                     batteryStatus = deviceControlServiceState.batteryStatus,
@@ -704,6 +737,11 @@ fun OpenJarvisApp(
                                     onMicClick = {
                                         requestPermissionsAndRun(requireMic = true, includeNotifications = false) {
                                             viewModel.onMicButtonClicked()
+                                        }
+                                    },
+                                    onToggleWakeWord = {
+                                        requestPermissionsAndRun(requireMic = true, includeNotifications = false) {
+                                            viewModel.toggleAudioRecordWakeWord()
                                         }
                                     },
                                     onToggleBackground = {
@@ -751,6 +789,7 @@ fun OpenJarvisApp(
                                     settings = settings,
                                     networkState = networkState,
                                     lanServerState = lanServerState,
+                                    wakeWordState = wakeWordState,
                                     ttsStatus = ttsStatus,
                                     isTtsSpeaking = isTtsSpeaking,
                                     permissionItems = permissionItems,
@@ -779,6 +818,9 @@ fun OpenJarvisApp(
                                     onUpdateSystemPrompt = { viewModel.updateSystemPrompt(it) },
                                     onUpdateVoicePreferences = { wakeOn, wake, offlineStt, autoSpeak ->
                                         viewModel.updateVoicePreferences(wakeOn, wake, offlineStt, autoSpeak)
+                                    },
+                                    onUpdateAudioRecordWakeWordConfig = { enabled, sensitivity ->
+                                        viewModel.updateAudioRecordWakeWordConfig(enabled, sensitivity)
                                     },
                                     onUpdateBackgroundModePreferences = { voiceInBg, continuousMode ->
                                         viewModel.updateBackgroundModePreferences(voiceInBg, continuousMode)

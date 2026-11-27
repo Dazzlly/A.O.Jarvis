@@ -75,7 +75,9 @@ data class JarvisSettings(
     val temperature: Float = 0.6f,
     val systemPrompt: String = "Você é o OpenJarvis, um assistente pessoal de IA local-first e inteligente rodando no Android. Seja preciso, claro e objetivo em português do Brasil, otimizado tanto para leitura quanto para resposta falada por voz.",
     val wakeWordEnabled: Boolean = true,
-    val wakeWord: String = "jarvis",
+    val wakeWord: String = "hey jarvis",
+    val audioRecordWakeWordEnabled: Boolean = true,
+    val wakeWordSensitivity: Float = 0.65f,
     val preferOfflineStt: Boolean = false,
     val autoSpeakResponses: Boolean = true,
     val voiceListeningInBgEnabled: Boolean = true,
@@ -107,6 +109,8 @@ class SettingsDataStore(private val context: Context) {
         val SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
         val WAKE_WORD_ENABLED = booleanPreferencesKey("wake_word_enabled")
         val WAKE_WORD = stringPreferencesKey("wake_word")
+        val AUDIO_RECORD_WAKE_WORD_ENABLED = booleanPreferencesKey("audio_record_wake_word_enabled")
+        val WAKE_WORD_SENSITIVITY = floatPreferencesKey("wake_word_sensitivity")
         val PREFER_OFFLINE_STT = booleanPreferencesKey("prefer_offline_stt")
         val AUTO_SPEAK = booleanPreferencesKey("auto_speak")
         val VOICE_BG_ENABLED = booleanPreferencesKey("voice_bg_enabled")
@@ -147,7 +151,9 @@ class SettingsDataStore(private val context: Context) {
             systemPrompt = prefs[Keys.SYSTEM_PROMPT]
                 ?: "Você é o A.O.Jarvis, um assistente pessoal de IA local-first e inteligente rodando no Android. Seja preciso, claro e objetivo em português do Brasil, otimizado tanto para leitura quanto para resposta falada por voz.",
             wakeWordEnabled = prefs[Keys.WAKE_WORD_ENABLED] ?: true,
-            wakeWord = prefs[Keys.WAKE_WORD] ?: "jarvis",
+            wakeWord = prefs[Keys.WAKE_WORD] ?: "hey jarvis",
+            audioRecordWakeWordEnabled = prefs[Keys.AUDIO_RECORD_WAKE_WORD_ENABLED] ?: true,
+            wakeWordSensitivity = (prefs[Keys.WAKE_WORD_SENSITIVITY] ?: 0.65f).coerceIn(0.2f, 1.0f),
             preferOfflineStt = prefs[Keys.PREFER_OFFLINE_STT] ?: false,
             autoSpeakResponses = prefs[Keys.AUTO_SPEAK] ?: true,
             voiceListeningInBgEnabled = prefs[Keys.VOICE_BG_ENABLED] ?: true,
@@ -204,9 +210,19 @@ class SettingsDataStore(private val context: Context) {
     ) {
         context.jarvisDataStore.edit {
             it[Keys.WAKE_WORD_ENABLED] = wakeWordEnabled
-            it[Keys.WAKE_WORD] = wakeWord.trim().lowercase().ifBlank { "jarvis" }
+            it[Keys.WAKE_WORD] = wakeWord.trim().lowercase().ifBlank { "hey jarvis" }
             it[Keys.PREFER_OFFLINE_STT] = preferOfflineStt
             it[Keys.AUTO_SPEAK] = autoSpeakResponses
+        }
+    }
+
+    suspend fun updateAudioRecordWakeWordConfig(
+        enabled: Boolean,
+        sensitivity: Float
+    ) {
+        context.jarvisDataStore.edit {
+            it[Keys.AUDIO_RECORD_WAKE_WORD_ENABLED] = enabled
+            it[Keys.WAKE_WORD_SENSITIVITY] = sensitivity.coerceIn(0.2f, 1.0f)
         }
     }
 

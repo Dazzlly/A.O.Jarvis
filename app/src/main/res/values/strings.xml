@@ -90,4 +90,8 @@
     <string name="cd_back">Voltar</string>
     <string name="cd_refresh_tts_voices">Atualizar vozes TTS instaladas</string>
     <string name="cd_preview_tts_voice">Ouvir prévia desta voz</string>
+
+    <string name="wake_word_audiorecord_title">Detecção leve \"Hey Jarvis\" (AudioRecord)</string>
+    <string name="wake_word_audiorecord_subtitle">Monitora áudio PCM via API AudioRecord do Android para ativar a escuta por voz sem pressionar nenhum botão</string>
+    <string name="cd_toggle_wake_word">Ativar ou pausar detecção por voz Hey Jarvis</string>
 </resources>
