@@ -1,0 +1,62 @@
+<resources>
+    <string name="app_name">OpenJarvis</string>
+    <string name="nav_console">Console</string>
+    <string name="nav_engines">Motores</string>
+    <string name="nav_tools">Comandos</string>
+    <string name="nav_telemetry">Telemetria</string>
+
+    <string name="mode_native_voice">Voz Nativa &amp; Chat</string>
+    <string name="mode_gemini_live">Gemini Live</string>
+    <string name="permission_mic_required">Conceda acesso ao microfone para comandos por voz, Gemini Live e escuta em segundo plano.</string>
+    <string name="permission_grant">Permitir</string>
+    <string name="input_placeholder">Pergunte ou fale um comando ao OpenJarvis…</string>
+
+    <string name="cd_stop_listening">Parar escuta de voz</string>
+    <string name="cd_mic_listen">Falar comando usando Speech-to-Text nativo</string>
+    <string name="cd_send_message">Enviar mensagem</string>
+    <string name="cd_jarvis_banner">Arte de telemetria neural do OpenJarvis</string>
+    <string name="cd_toggle_background">Alternar escuta contínua em segundo plano</string>
+    <string name="cd_clear_chat">Limpar histórico do chat</string>
+
+    <string name="bg_mode_on">BG Ativo</string>
+    <string name="bg_mode_off">BG Off</string>
+    <string name="bg_channel_name">OpenJarvis Voz Contínua</string>
+    <string name="bg_channel_desc">Mantém o reconhecimento de fala nativo ativo em segundo plano para interações contínuas, Ollama local e comandos offline.</string>
+    <string name="bg_notif_title">OpenJarvis em segundo plano</string>
+    <string name="bg_action_pause">Pausar</string>
+    <string name="bg_action_resume">Retomar</string>
+    <string name="bg_action_stop">Encerrar</string>
+
+    <string name="live_title">Gemini Live em Tempo Real</string>
+    <string name="live_connecting">Conectando ao Gemini 3.8 Live…</string>
+    <string name="live_active">Conversa ao vivo conectada — pode falar</string>
+    <string name="live_subtitle">Áudio bidirecional de baixa latência usando Firebase AI Logic (gemini-3.8-live) com sua memória local do OpenJarvis.</string>
+    <string name="live_start">Iniciar Conversa Live</string>
+    <string name="live_stop">Encerrar Sessão Live</string>
+
+    <string name="tools_tab_commands">Comandos</string>
+    <string name="tools_tab_memories">Memórias</string>
+    <string name="tools_add_command">Novo Comando de Voz</string>
+    <string name="tools_add_memory">Nova Memória Local</string>
+
+    <string name="engines_routing_title">Política de Roteamento</string>
+    <string name="engines_ollama_title">Servidor Ollama (Rede Local)</string>
+    <string name="engines_gemini_title">Inteligência Gemini (Cloud)</string>
+    <string name="engines_voice_title">Voz Nativa &amp; Segundo Plano</string>
+    <string name="engines_test_connection">Testar &amp; Listar Modelos</string>
+
+    <string name="telemetry_title">Telemetria &amp; Traces</string>
+
+    <string name="session_new">Nova conversa</string>
+    <string name="cd_new_session">Iniciar nova sessão de conversa</string>
+    <string name="lan_server_title">Gatilhos de Rede Local (Wi-Fi LAN)</string>
+    <string name="lan_server_subtitle">Receba comandos autenticados de scripts ou PCs na mesma rede Wi-Fi enquanto o serviço estiver ativo</string>
+    <string name="cd_copy_lan_token">Copiar token de autenticação LAN</string>
+    <string name="cd_regenerate_lan_token">Gerar novo token de autenticação LAN</string>
+    <string name="cd_copy_curl">Copiar exemplo de comando curl</string>
+
+    <string name="updates_title">Atualizações Remotas (GitHub &amp; F-Droid)</string>
+    <string name="updates_subtitle">Acompanhe novas versões via GitHub Releases e sincronize atualizações pelo seu repositório F-Droid</string>
+    <string name="cd_dismiss_update_banner">Fechar aviso de atualização</string>
+    <string name="cd_copy_fdroid_url">Copiar URL do repositório F-Droid</string>
+</resources>

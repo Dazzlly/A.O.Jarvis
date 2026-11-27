@@ -1,0 +1,4 @@
+- Versão inicial do OpenJarvis Android com Gemini Cloud, Gemini Live e Ollama local via Wi-Fi.
+- Foreground Service contínuo para escuta de voz nativa e servidor autenticado de gatilhos LAN.
+- Integração com aplicativos do sistema, permissões de autonomia e auto-navegação guiada.
+- Suporte a verificação remota de atualizações via GitHub Releases e repositório F-Droid próprio.
