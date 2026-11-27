@@ -1,7 +1,9 @@
 package com.example.engine
 
+import android.graphics.Bitmap
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
+import com.example.core.DeviceSettingsController
 import com.example.data.ChatMessageEntity
 import com.example.data.DEFAULT_SESSION_ID
 import com.example.data.JarvisDatabase
@@ -9,6 +11,8 @@ import com.example.data.JarvisSettings
 import com.example.data.RoutingMode
 import com.example.data.SettingsDataStore
 import com.example.data.TraceEntity
+import com.example.data.VoiceCommandEntity
+import com.example.vision.ScreenVisionManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -20,6 +24,8 @@ class OpenJarvisOrchestrator(
     val offlineEngine: OfflineCommandEngine,
     val appSelfController: AppSelfController,
     val integrationManager: AppIntegrationManager,
+    val deviceSettingsController: DeviceSettingsController,
+    val screenVisionManager: ScreenVisionManager,
     private val isBackgroundRunningProvider: () -> Boolean = { false }
 ) {
     val geminiEngine: GeminiInferenceEngine get() = networkEngineManager.geminiEngine
@@ -29,7 +35,8 @@ class OpenJarvisOrchestrator(
         rawPrompt: String,
         sourceTag: String = "TEXT",
         sessionId: String = DEFAULT_SESSION_ID,
-        routingOverride: RoutingMode? = null
+        routingOverride: RoutingMode? = null,
+        attachedBitmap: Bitmap? = null
     ): Flow<InferenceStreamEvent> = flow {
         val trimmed = rawPrompt.trim()
         if (trimmed.isEmpty()) return@flow
@@ -114,27 +121,50 @@ class OpenJarvisOrchestrator(
                 )
             }
         val memories = database.memoryDao().getAllMemories()
+        val isScreenSharing = screenVisionManager.state.value.isSharing
+        val effectiveBitmap = attachedBitmap ?: if (isScreenSharing || screenVisionManager.state.value.hasFrame) {
+            screenVisionManager.getLatestFrameCopy()
+        } else {
+            null
+        }
+
         val selfAwarenessContext = appSelfController.buildSelfAwarenessPrompt(
             settings = settings,
-            isBackgroundRunning = isBackgroundRunningProvider()
+            isBackgroundRunning = isBackgroundRunningProvider(),
+            isScreenSharing = isScreenSharing
         )
 
-        // 3. Delegate routing between Local Ollama (Wi-Fi) and Gemini API (Firebase AI Logic)
+        // 3. Delegate routing between Local Ollama (Wi-Fi) and Gemini API (Firebase AI Logic + Vision)
         networkEngineManager.streamInference(
             prompt = effectivePrompt,
             history = history,
             memories = memories,
             settings = settings,
             routingOverride = routingOverride,
-            selfAwarenessContext = selfAwarenessContext
+            selfAwarenessContext = selfAwarenessContext,
+            attachedBitmap = effectiveBitmap
         ).collect { event ->
             when (event) {
                 is InferenceStreamEvent.Chunk -> emit(event)
                 is InferenceStreamEvent.Completed -> {
-                    // Intercept & execute any [[ACTION:...]] self-navigation / app-integration tags
+                    // Intercept & execute any [[ACTION:...]] self-navigation, device-settings or app-integration tags
                     val parsed = appSelfController.parseActions(event.fullText)
                     val executedNotes = if (parsed.actions.isNotEmpty()) {
-                        appSelfController.executeParsedActions(parsed.actions, integrationManager)
+                        appSelfController.executeParsedActions(
+                            actions = parsed.actions,
+                            integrationManager = integrationManager,
+                            deviceSettingsController = deviceSettingsController,
+                            onLearnCommand = { trigger, reply ->
+                                database.voiceCommandDao().insertCommand(
+                                    VoiceCommandEntity(
+                                        triggerPhrase = trigger,
+                                        actionType = "OFFLINE_RESPONSE",
+                                        actionPayload = reply,
+                                        enabled = true
+                                    )
+                                )
+                            }
+                        )
                     } else {
                         emptyList()
                     }

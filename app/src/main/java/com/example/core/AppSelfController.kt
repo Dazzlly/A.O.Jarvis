@@ -59,6 +59,9 @@ sealed interface AppUiCommand {
     data object CreateNewSession : AppUiCommand
     data object ProbeOllama : AppUiCommand
     data object CheckUpdates : AppUiCommand
+    data object RequestScreenShare : AppUiCommand
+    data object StopScreenShare : AppUiCommand
+    data class StartSelfEvolution(val request: String) : AppUiCommand
     data class ShowGuidanceBanner(val message: String) : AppUiCommand
 }
 
@@ -151,12 +154,13 @@ class AppSelfController(private val appContext: Context) {
      */
     fun buildSelfAwarenessPrompt(
         settings: JarvisSettings,
-        isBackgroundRunning: Boolean
+        isBackgroundRunning: Boolean,
+        isScreenSharing: Boolean = false
     ): String {
         val currentTab = _currentDestination.value
         val permsSummary = PermissionsManager.summarizePermissionsForPrompt(appContext)
         return buildString {
-            append("\n\n[AUTOCONSCIÊNCIA E AUTONAVEGAÇÃO DO APP OPENJARVIS]\n")
+            append("\n\n[AUTOCONSCIÊNCIA, VISÃO DE TELA, CONTROLE DO DISPOSITIVO E AUTO-EVOLUÇÃO]\n")
             append("Você é o próprio aplicativo Android OpenJarvis. Conheça suas telas:\n")
             AppDestination.entries.forEach { dest ->
                 append("- Aba ${dest.key} (${dest.displayName}): ${dest.summary}.\n")
@@ -165,24 +169,35 @@ class AppSelfController(private val appContext: Context) {
             append("TTS automático=${if (settings.autoSpeakResponses) "ativado" else "desativado"}, ")
             append("tema=${if (settings.darkTheme) "escuro" else "claro"}, ")
             append("serviço background=${if (isBackgroundRunning) "ativo" else "inativo"}, ")
+            append("compartilhamento de tela=${if (isScreenSharing) "ATIVO (você recebe quadros da tela do usuário)" else "inativo"}, ")
             append("servidor LAN=${if (settings.lanTriggerEnabled) "habilitado na porta ${settings.lanTriggerPort}" else "desativado"}.\n")
             append("$permsSummary.\n")
-            append("Quando o usuário pedir para navegar no app, mudar configurações, iniciar tour guiado, abrir aplicativos externos, ")
-            append("traçar rota ou conceder permissões, responda de forma natural em português e adicione ao final a tag de ação correspondente (o sistema executa e oculta a tag):\n")
+            append("Quando o usuário pedir para navegar no app, alterar configurações do celular (brilho, volume, lanterna, rotação, não perturbe, tempo de tela, painéis Wi-Fi/Bluetooth), compartilhar tela, evoluir o próprio código no GitHub ou abrir apps externos, responda em português e adicione ao final a tag correspondente (o sistema executa e oculta a tag):\n")
             append("- [[ACTION:NAVIGATE:CONSOLE|ENGINES|TOOLS|TELEMETRY]] (navega para uma aba do app)\n")
             append("- [[ACTION:OPEN_MODE:GEMINI_LIVE|NATIVE]] (alterna entre Voz Nativa e Gemini Live)\n")
             append("- [[ACTION:SET_THEME:DARK|LIGHT]] (troca o tema do app)\n")
             append("- [[ACTION:SET_ROUTING:AUTO|GEMINI|OLLAMA|OFFLINE]] (troca o motor de IA)\n")
             append("- [[ACTION:TOGGLE_BG:START|STOP]] (liga/desliga o serviço em segundo plano)\n")
+            append("- [[ACTION:SCREEN_SHARE:START|STOP]] (inicia ou encerra o compartilhamento de tela para visão em tempo real)\n")
+            append("- [[ACTION:DEVICE_SETTING:brightness=80|up|down|auto|manual]] (ajusta o brilho da tela)\n")
+            append("- [[ACTION:DEVICE_SETTING:volume=70|up|down|mute|max]] (ajusta o volume de mídia)\n")
+            append("- [[ACTION:DEVICE_SETTING:torch=on|off]] (liga/desliga a lanterna)\n")
+            append("- [[ACTION:DEVICE_SETTING:rotate=on|off]] (ativa/trava rotação automática)\n")
+            append("- [[ACTION:DEVICE_SETTING:dnd=on|off]] (ativa/desativa Não Perturbe)\n")
+            append("- [[ACTION:DEVICE_SETTING:ringer=normal|vibrate|silent]] (altera modo de toque)\n")
+            append("- [[ACTION:DEVICE_SETTING:timeout=60]] (define tempo limite de tela em segundos)\n")
+            append("- [[ACTION:DEVICE_SETTING:panel=wifi|bluetooth|volume|battery|location|display|airplane]] (abre painel nativo de configuração)\n")
+            append("- [[ACTION:SELF_EVOLVE:<descrição clara da melhoria de código>]] (abre o pipeline seguro de Auto-Evolução no GitHub para propor Pull Request)\n")
+            append("- [[ACTION:LEARN_COMMAND:<gatilho>|<resposta>]] (aprende imediatamente um novo comando local de voz)\n")
             append("- [[ACTION:NEW_SESSION]] (cria uma nova conversa)\n")
             append("- [[ACTION:PROBE_OLLAMA]] (testa conexão com o servidor Ollama local)\n")
             append("- [[ACTION:CHECK_UPDATES]] (verifica atualizações do app via GitHub Releases / F-Droid)\n")
             append("- [[ACTION:REQUEST_PERMISSIONS]] (abre pedido de todas as permissões de autonomia)\n")
             append("- [[ACTION:TOUR:START]] (inicia o tour guiado interativo pelo próprio app)\n")
-            append("- [[ACTION:OPEN_APP:<nome>]] (abre WhatsApp, YouTube, Spotify, Maps, Waze, Chrome, Gmail, Telegram, Instagram, Agenda, Câmera, Configurações)\n")
+            append("- [[ACTION:OPEN_APP:<nome>]] (abre apps instalados no dispositivo)\n")
             append("- [[ACTION:NAVIGATE_MAPS:<destino>]] (abre rota no Google Maps)\n")
             append("- [[ACTION:WEB_SEARCH:<consulta>]] (pesquisa no navegador)\n")
-            append("Use tags [[ACTION:...]] apenas quando o usuário solicitar uma ação ou navegação.")
+            append("Use tags [[ACTION:...]] apenas quando o usuário solicitar uma ação real.")
         }
     }
 
@@ -203,7 +218,9 @@ class AppSelfController(private val appContext: Context) {
 
     suspend fun executeParsedActions(
         actions: List<String>,
-        integrationManager: AppIntegrationManager
+        integrationManager: AppIntegrationManager,
+        deviceSettingsController: DeviceSettingsController? = null,
+        onLearnCommand: (suspend (trigger: String, response: String) -> Unit)? = null
     ): List<String> {
         val executedNotes = mutableListOf<String>()
         for (rawAction in actions) {
@@ -242,6 +259,41 @@ class AppSelfController(private val appContext: Context) {
                 "TOGGLE_BG" -> {
                     val start = !arg.equals("STOP", ignoreCase = true)
                     emitCommand(AppUiCommand.ToggleBackgroundService(start))
+                }
+
+                "SCREEN_SHARE" -> {
+                    val stop = arg.equals("STOP", ignoreCase = true) || arg.equals("OFF", ignoreCase = true)
+                    if (stop) {
+                        emitCommand(AppUiCommand.StopScreenShare)
+                        executedNotes.add("Compartilhamento de tela encerrado")
+                    } else {
+                        emitCommand(AppUiCommand.RequestScreenShare)
+                        executedNotes.add("Solicitando compartilhamento de tela")
+                    }
+                }
+
+                "DEVICE_SETTING" -> {
+                    if (arg.isNotBlank() && deviceSettingsController != null) {
+                        val res = deviceSettingsController.executeSettingAction(arg)
+                        executedNotes.add(res.message)
+                    }
+                }
+
+                "SELF_EVOLVE" -> {
+                    if (arg.isNotBlank()) {
+                        emitCommand(AppUiCommand.NavigateTo(AppDestination.TOOLS))
+                        emitCommand(AppUiCommand.StartSelfEvolution(arg))
+                        executedNotes.add("Pipeline de auto-evolução iniciado no GitHub")
+                    }
+                }
+
+                "LEARN_COMMAND" -> {
+                    val trigger = arg.substringBefore("|").trim()
+                    val reply = arg.substringAfter("|", "").trim()
+                    if (trigger.isNotBlank() && reply.isNotBlank() && onLearnCommand != null) {
+                        onLearnCommand(trigger, reply)
+                        executedNotes.add("Novo comando local \"$trigger\" aprendido")
+                    }
                 }
 
                 "NEW_SESSION" -> {

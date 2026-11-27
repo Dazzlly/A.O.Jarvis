@@ -1,13 +1,25 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
 import android.speech.SpeechRecognizer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.AppDestination
 import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
+import com.example.core.DeviceSettingsSnapshot
+import com.example.core.EvolutionProposal
 import com.example.core.GuidedTourState
+import com.example.core.IntegrationResult
+import com.example.core.SelfEvolutionState
+import com.example.vision.ScreenShareState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.data.ChatMessageEntity
 import com.example.data.ConversationSessionEntity
 import com.example.data.DEFAULT_SESSION_ID
@@ -61,6 +73,9 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     private val appSelfController = coordinator.appSelfController
     private val speechController = coordinator.speechController
     private val appUpdateManager = coordinator.appUpdateManager
+    private val deviceSettingsController = coordinator.deviceSettingsController
+    private val screenVisionManager = coordinator.screenVisionManager
+    private val selfEvolutionManager = coordinator.selfEvolutionManager
 
     init {
         viewModelScope.launch {
@@ -118,6 +133,12 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     val updateState: StateFlow<AppUpdateState> = appUpdateManager.state
     val currentVersionLabel: String =
         "v${appUpdateManager.currentVersionName} (build ${appUpdateManager.currentVersionCode})"
+    val screenShareState: StateFlow<ScreenShareState> = screenVisionManager.state
+    val selfEvolutionState: StateFlow<SelfEvolutionState> = selfEvolutionManager.state
+    val hasGitHubToken: StateFlow<Boolean> = selfEvolutionManager.hasToken
+
+    private val _deviceSettingsSnapshot = MutableStateFlow(deviceSettingsController.readSnapshot())
+    val deviceSettingsSnapshot: StateFlow<DeviceSettingsSnapshot> = _deviceSettingsSnapshot.asStateFlow()
 
     val ollamaHealth: StateFlow<OllamaHealthStatus?> = networkState
         .map { it.ollamaHealth }
@@ -563,6 +584,107 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
 
     fun openInFdroid(url: String): Result<String> {
         return appUpdateManager.openInFdroid(url)
+    }
+
+    // Real-Time Screen Sharing & Visual Identification
+    fun createScreenCaptureIntent(): Intent {
+        return screenVisionManager.createScreenCaptureIntent(getApplication())
+    }
+
+    fun startScreenShare(resultCode: Int, data: Intent) {
+        screenVisionManager.startScreenShareService(getApplication(), resultCode, data)
+    }
+
+    fun stopScreenShare() {
+        screenVisionManager.stopScreenShareService(getApplication())
+    }
+
+    fun clearScreenShareError() {
+        screenVisionManager.clearError()
+    }
+
+    fun analyzeCurrentScreenNow(
+        question: String = "Identifique e descreva de forma clara o que estou visualizando na tela agora."
+    ) {
+        sendPrompt(question, sourceTag = CommandSource.TEXT.tag)
+    }
+
+    fun analyzePickedImageUri(uri: Uri) {
+        viewModelScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        val source = ImageDecoder.createSource(resolver, uri)
+                        ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                            decoder.isMutableRequired = false
+                        }
+                    } else {
+                        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                    }
+                }.getOrNull()
+            }
+            if (bitmap != null) {
+                screenVisionManager.attachManualScreenshot(bitmap)
+                sendPrompt(
+                    prompt = "Identifique e explique o que aparece nesta imagem/captura de tela.",
+                    sourceTag = CommandSource.TEXT.tag
+                )
+            }
+        }
+    }
+
+    // Device Settings Control
+    fun refreshDeviceSettings() {
+        _deviceSettingsSnapshot.value = deviceSettingsController.readSnapshot()
+    }
+
+    fun openWriteSettingsPermission(): IntegrationResult =
+        deviceSettingsController.openWriteSettingsPermission().also { refreshDeviceSettings() }
+
+    fun openDndAccessPermission(): IntegrationResult =
+        deviceSettingsController.openDndAccessPermission().also { refreshDeviceSettings() }
+
+    fun setDeviceBrightness(percent: Int): IntegrationResult =
+        deviceSettingsController.setBrightnessPercent(percent).also { refreshDeviceSettings() }
+
+    fun setDeviceVolume(percent: Int): IntegrationResult =
+        deviceSettingsController.setMediaVolumePercent(percent).also { refreshDeviceSettings() }
+
+    fun toggleDeviceTorch(enabled: Boolean): IntegrationResult =
+        deviceSettingsController.setTorchEnabled(enabled).also { refreshDeviceSettings() }
+
+    fun toggleDeviceAutoRotate(enabled: Boolean): IntegrationResult =
+        deviceSettingsController.setAutoRotate(enabled).also { refreshDeviceSettings() }
+
+    fun toggleDeviceDnd(enabled: Boolean): IntegrationResult =
+        deviceSettingsController.setDoNotDisturb(enabled).also { refreshDeviceSettings() }
+
+    fun openDeviceSystemPanel(target: String): IntegrationResult =
+        deviceSettingsController.openSystemPanelOrSettings(target)
+
+    // Safe GitHub Self-Evolution (PR Auto-Development)
+    fun saveGitHubDevToken(token: String): Boolean = selfEvolutionManager.saveGitHubToken(token)
+
+    fun clearGitHubDevToken() = selfEvolutionManager.clearGitHubToken()
+
+    fun generateSelfEvolutionProposal(request: String) {
+        viewModelScope.launch {
+            selfEvolutionManager.generateEvolutionProposal(
+                rawGitHubRepo = settings.value.githubRepo,
+                userRequest = request
+            )
+        }
+    }
+
+    fun approveSelfEvolutionProposal(proposal: EvolutionProposal) {
+        viewModelScope.launch {
+            selfEvolutionManager.approveAndCreatePullRequest(proposal)
+        }
+    }
+
+    fun resetSelfEvolution() {
+        selfEvolutionManager.resetState()
     }
 
     override fun onCleared() {

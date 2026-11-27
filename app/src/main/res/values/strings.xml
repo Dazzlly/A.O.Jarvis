@@ -59,4 +59,7 @@
     <string name="updates_subtitle">Acompanhe novas versões via GitHub Releases e sincronize atualizações pelo seu repositório F-Droid</string>
     <string name="cd_dismiss_update_banner">Fechar aviso de atualização</string>
     <string name="cd_copy_fdroid_url">Copiar URL do repositório F-Droid</string>
+    <string name="tools_tab_autodev">Auto-Dev</string>
+    <string name="cd_share_screen">Compartilhar tela com o OpenJarvis</string>
+    <string name="cd_pick_screenshot">Selecionar captura ou imagem para análise visual</string>
 </resources>

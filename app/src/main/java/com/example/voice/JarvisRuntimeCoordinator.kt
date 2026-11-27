@@ -6,6 +6,9 @@ import androidx.core.content.ContextCompat
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
 import com.example.core.AppUpdateManager
+import com.example.core.DeviceSettingsController
+import com.example.core.SecureTokenStore
+import com.example.core.SelfEvolutionManager
 import com.example.data.JarvisDatabase
 import com.example.data.SettingsDataStore
 import com.example.engine.GeminiInferenceEngine
@@ -15,6 +18,7 @@ import com.example.engine.OfflineCommandEngine
 import com.example.engine.OllamaInferenceEngine
 import com.example.engine.OpenJarvisOrchestrator
 import com.example.state.ConversationStateManager
+import com.example.vision.ScreenVisionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,6 +51,13 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
     val integrationManager: AppIntegrationManager = AppIntegrationManager(appContext)
     val appSelfController: AppSelfController = AppSelfController(appContext)
     val appUpdateManager: AppUpdateManager = AppUpdateManager(appContext)
+    val secureTokenStore: SecureTokenStore = SecureTokenStore(appContext)
+    val deviceSettingsController: DeviceSettingsController = DeviceSettingsController(appContext)
+    val screenVisionManager: ScreenVisionManager = ScreenVisionManager()
+    val selfEvolutionManager: SelfEvolutionManager = SelfEvolutionManager(
+        tokenStore = secureTokenStore,
+        appUpdateManager = appUpdateManager
+    )
 
     val geminiEngine: GeminiInferenceEngine = GeminiInferenceEngine()
     val ollamaEngine: OllamaInferenceEngine = OllamaInferenceEngine()
@@ -62,7 +73,9 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
         settingsDataStore = settingsDataStore,
         ollamaEngine = ollamaEngine,
         integrationManager = integrationManager,
-        appSelfController = appSelfController
+        appSelfController = appSelfController,
+        deviceSettingsController = deviceSettingsController,
+        screenVisionManager = screenVisionManager
     )
     val orchestrator: OpenJarvisOrchestrator = OpenJarvisOrchestrator(
         database = database,
@@ -71,6 +84,8 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
         offlineEngine = offlineEngine,
         appSelfController = appSelfController,
         integrationManager = integrationManager,
+        deviceSettingsController = deviceSettingsController,
+        screenVisionManager = screenVisionManager,
         isBackgroundRunningProvider = { _voiceState.value.isBackgroundRunning }
     )
     val conversationStateManager: ConversationStateManager = ConversationStateManager(

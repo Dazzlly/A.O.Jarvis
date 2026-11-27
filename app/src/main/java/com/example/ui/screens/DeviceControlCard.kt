@@ -1,0 +1,331 @@
+package com.example.ui.screens
+
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Brightness6
+import androidx.compose.material.icons.rounded.DoNotDisturbOn
+import androidx.compose.material.icons.rounded.FlashlightOn
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material.icons.rounded.SettingsApplications
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import com.example.core.DeviceSettingsSnapshot
+import com.example.core.IntegrationResult
+import kotlin.math.roundToInt
+
+@Composable
+fun DeviceControlCard(
+    snapshot: DeviceSettingsSnapshot,
+    onRefreshSnapshot: () -> Unit,
+    onOpenWriteSettingsPermission: () -> IntegrationResult,
+    onOpenDndPermission: () -> IntegrationResult,
+    onSetBrightness: (Int) -> IntegrationResult,
+    onSetVolume: (Int) -> IntegrationResult,
+    onToggleTorch: (Boolean) -> IntegrationResult,
+    onToggleAutoRotate: (Boolean) -> IntegrationResult,
+    onToggleDnd: (Boolean) -> IntegrationResult,
+    onOpenSystemPanel: (String) -> IntegrationResult,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var brightnessSlider by remember { mutableFloatStateOf(snapshot.brightnessPercent.toFloat()) }
+    var volumeSlider by remember { mutableFloatStateOf(snapshot.mediaVolumePercent.toFloat()) }
+
+    LaunchedEffect(snapshot.brightnessPercent, snapshot.mediaVolumePercent) {
+        brightnessSlider = snapshot.brightnessPercent.toFloat()
+        volumeSlider = snapshot.mediaVolumePercent.toFloat()
+    }
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("device_control_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Rounded.SettingsApplications,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Controle do Dispositivo",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Permita que o OpenJarvis altere brilho, volume, lanterna, rotação, Não Perturbe e painéis do sistema",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(
+                    onClick = onRefreshSnapshot,
+                    modifier = Modifier.testTag("refresh_device_settings_button")
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar estado do dispositivo")
+                }
+            }
+
+            // Special Android Permissions Banners (WRITE_SETTINGS & DND)
+            if (!snapshot.canWriteSystemSettings || !snapshot.hasDndAccess) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Autorizações especiais do Android para controle completo:",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (!snapshot.canWriteSystemSettings) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        val res = onOpenWriteSettingsPermission()
+                                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("grant_write_settings_button")
+                                ) {
+                                    Text("Alterar Sistema")
+                                }
+                            }
+                            if (!snapshot.hasDndAccess) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        val res = onOpenDndPermission()
+                                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("grant_dnd_access_button")
+                                ) {
+                                    Text("Não Perturbe")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Brightness slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.Brightness6,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Brilho da Tela", style = MaterialTheme.typography.labelLarge)
+                }
+                Text(
+                    text = "${brightnessSlider.roundToInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Slider(
+                value = brightnessSlider,
+                onValueChange = { brightnessSlider = it },
+                onValueChangeFinished = {
+                    val res = onSetBrightness(brightnessSlider.roundToInt())
+                    if (!res.success) {
+                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                    }
+                },
+                valueRange = 5f..100f,
+                modifier = Modifier.testTag("device_brightness_slider")
+            )
+
+            // Media Volume slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.VolumeUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Volume de Mídia", style = MaterialTheme.typography.labelLarge)
+                }
+                Text(
+                    text = "${volumeSlider.roundToInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Slider(
+                value = volumeSlider,
+                onValueChange = { volumeSlider = it },
+                onValueChangeFinished = {
+                    onSetVolume(volumeSlider.roundToInt())
+                },
+                valueRange = 0f..100f,
+                modifier = Modifier.testTag("device_volume_slider")
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Quick toggles: Torch, Auto-Rotate, Do Not Disturb
+            DeviceToggleRow(
+                icon = Icons.Rounded.FlashlightOn,
+                title = "Lanterna (Flash)",
+                checked = snapshot.isTorchOn,
+                onCheckedChange = { enabled ->
+                    val res = onToggleTorch(enabled)
+                    Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                },
+                testTag = "switch_device_torch"
+            )
+            DeviceToggleRow(
+                icon = Icons.Rounded.ScreenRotation,
+                title = "Rotação Automática",
+                checked = snapshot.isAutoRotate,
+                onCheckedChange = { enabled ->
+                    val res = onToggleAutoRotate(enabled)
+                    Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                },
+                testTag = "switch_device_rotate"
+            )
+            DeviceToggleRow(
+                icon = Icons.Rounded.DoNotDisturbOn,
+                title = "Modo Não Perturbe (${snapshot.ringerModeLabel})",
+                checked = snapshot.isDndEnabled,
+                onCheckedChange = { enabled ->
+                    val res = onToggleDnd(enabled)
+                    Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                },
+                testTag = "switch_device_dnd"
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Painéis rápidos do Android",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(
+                    "Wi-Fi / Internet" to "wifi",
+                    "Bluetooth" to "bluetooth",
+                    "Volume" to "volume",
+                    "Bateria" to "bateria",
+                    "Tela" to "tela",
+                    "Localização" to "localizacao"
+                ).forEach { (label, target) ->
+                    AssistChip(
+                        onClick = {
+                            val res = onOpenSystemPanel(target)
+                            if (!res.success) {
+                                Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceToggleRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.testTag(testTag)
+        )
+    }
+}

@@ -1,5 +1,6 @@
 package com.example.state
 
+import android.graphics.Bitmap
 import com.example.data.ChatMessageEntity
 import com.example.data.ConversationSessionEntity
 import com.example.data.DEFAULT_SESSION_ID
@@ -185,7 +186,8 @@ class ConversationStateManager(
         prompt: String,
         source: CommandSource,
         routingOverride: RoutingMode? = null,
-        sessionIdOverride: String? = null
+        sessionIdOverride: String? = null,
+        attachedBitmap: Bitmap? = null
     ): Flow<InferenceStreamEvent> = flow {
         val cleanPrompt = prompt.trim()
         if (cleanPrompt.isEmpty()) return@flow
@@ -237,7 +239,8 @@ class ConversationStateManager(
                 rawPrompt = cleanPrompt,
                 sourceTag = source.tag,
                 sessionId = targetSessionId,
-                routingOverride = routingOverride
+                routingOverride = routingOverride,
+                attachedBitmap = attachedBitmap
             ).collect { event ->
                 when (event) {
                     is InferenceStreamEvent.Chunk -> {

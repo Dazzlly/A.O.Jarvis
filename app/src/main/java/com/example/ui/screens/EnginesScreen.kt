@@ -76,6 +76,8 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.core.AppUpdateState
 import com.example.core.AutonomyPermissionItem
+import com.example.core.DeviceSettingsSnapshot
+import com.example.core.IntegrationResult
 import com.example.data.JarvisSettings
 import com.example.data.RoutingMode
 import com.example.engine.NetworkEngineState
@@ -155,6 +157,16 @@ fun EnginesScreen(
     onBuildDefaultFdroidUrl: (String) -> String,
     onOpenGitHubRelease: (String) -> Result<String>,
     onOpenInFdroid: (String) -> Result<String>,
+    deviceSettingsSnapshot: DeviceSettingsSnapshot,
+    onRefreshDeviceSettings: () -> Unit,
+    onOpenWriteSettingsPermission: () -> IntegrationResult,
+    onOpenDndPermission: () -> IntegrationResult,
+    onSetDeviceBrightness: (Int) -> IntegrationResult,
+    onSetDeviceVolume: (Int) -> IntegrationResult,
+    onToggleDeviceTorch: (Boolean) -> IntegrationResult,
+    onToggleDeviceAutoRotate: (Boolean) -> IntegrationResult,
+    onToggleDeviceDnd: (Boolean) -> IntegrationResult,
+    onOpenDevicePanel: (String) -> IntegrationResult,
     onUpdateDarkTheme: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -803,6 +815,22 @@ fun EnginesScreen(
                     }
                 }
             }
+        }
+
+        // 4A-2. Real Device Settings Control (Brightness, Volume, Torch, Rotation, DND, Panels)
+        item {
+            DeviceControlCard(
+                snapshot = deviceSettingsSnapshot,
+                onRefreshSnapshot = onRefreshDeviceSettings,
+                onOpenWriteSettingsPermission = onOpenWriteSettingsPermission,
+                onOpenDndPermission = onOpenDndPermission,
+                onSetBrightness = onSetDeviceBrightness,
+                onSetVolume = onSetDeviceVolume,
+                onToggleTorch = onToggleDeviceTorch,
+                onToggleAutoRotate = onToggleDeviceAutoRotate,
+                onToggleDnd = onToggleDeviceDnd,
+                onOpenSystemPanel = onOpenDevicePanel
+            )
         }
 
         // 4B. Local Network (LAN / Wi-Fi) Trigger Server for Foreground Service

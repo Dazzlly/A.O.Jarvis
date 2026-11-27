@@ -1,5 +1,6 @@
 package com.example.engine
 
+import android.graphics.Bitmap
 import android.util.Log
 import com.example.data.JarvisSettings
 import com.example.data.MemoryEntity
@@ -93,7 +94,8 @@ class GeminiInferenceEngine {
         history: List<ConversationTurn>,
         memories: List<MemoryEntity>,
         settings: JarvisSettings,
-        selfAwarenessContext: String = ""
+        selfAwarenessContext: String = "",
+        attachedBitmap: Bitmap? = null
     ): Flow<InferenceStreamEvent> = flow {
         val startMs = System.currentTimeMillis()
         val modelName = settings.geminiModel.ifBlank { "gemini-3.8-flash" }
@@ -105,7 +107,23 @@ class GeminiInferenceEngine {
 
             withTimeout(60_000L) {
                 val chat = model.startChat(history = chatHistory)
-                chat.sendMessageStream(prompt).collect { chunk ->
+                val streamFlow = if (attachedBitmap != null && !attachedBitmap.isRecycled) {
+                    val visionPrompt = buildString {
+                        append("[IMAGEM DA TELA DO USUÁRIO COMPARTILHADA EM TEMPO REAL]\n")
+                        append("Analise atentamente o conteúdo visível na tela anexada (textos, apps, botões, imagens, erros ou contexto) para responder ao pedido do usuário.\n\n")
+                        append(prompt)
+                    }
+                    chat.sendMessageStream(
+                        content(role = "user") {
+                            image(attachedBitmap)
+                            text(visionPrompt)
+                        }
+                    )
+                } else {
+                    chat.sendMessageStream(prompt)
+                }
+
+                streamFlow.collect { chunk ->
                     val chunkText = chunk.text.orEmpty()
                     if (chunkText.isNotEmpty()) {
                         accumulated.append(chunkText)

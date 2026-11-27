@@ -1,11 +1,13 @@
 package com.example.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -114,9 +116,15 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
     val ollamaHealth by viewModel.ollamaHealth.collectAsStateWithLifecycle()
     val isProbingOllama by viewModel.isProbingOllama.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+    val screenShareState by viewModel.screenShareState.collectAsStateWithLifecycle()
+    val deviceSettingsSnapshot by viewModel.deviceSettingsSnapshot.collectAsStateWithLifecycle()
+    val selfEvolutionState by viewModel.selfEvolutionState.collectAsStateWithLifecycle()
+    val hasGitHubToken by viewModel.hasGitHubToken.collectAsStateWithLifecycle()
 
     var currentTab by rememberSaveable { mutableStateOf(JarvisTab.CONSOLE) }
     var selectedConsoleMode by rememberSaveable { mutableIntStateOf(0) } // 0 = Native STT & Chat, 1 = Gemini Live
+    var selectedToolsTab by rememberSaveable { mutableIntStateOf(0) } // 0 = Comandos, 1 = Memórias, 2 = Auto-Dev
+    var selfEvolutionDraft by rememberSaveable { mutableStateOf("") }
     var permissionRevision by remember { mutableIntStateOf(0) }
     var autoPermissionsPrompted by rememberSaveable { mutableStateOf(false) }
     var autoUpdateChecked by rememberSaveable { mutableStateOf(false) }
@@ -177,6 +185,32 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
         pendingRequiresMic = false
     }
 
+    val mediaProjectionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            viewModel.startScreenShare(result.resultCode, data)
+            Toast.makeText(
+                context,
+                "Compartilhamento de tela ativo! Pergunte ao OpenJarvis sobre o que estiver vendo.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            Toast.makeText(context, "Compartilhamento de tela cancelado.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            currentTab = JarvisTab.CONSOLE
+            selectedConsoleMode = 0
+            viewModel.analyzePickedImageUri(uri)
+        }
+    }
+
     fun requestAllAutonomyPermissions() {
         val missing = PermissionsManager.missingPermissions(context)
         if (missing.isEmpty()) {
@@ -214,6 +248,17 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
             pendingPermissionAction = onGranted
             permissionsLauncher.launch(toRequest.toTypedArray())
         }
+    }
+
+    fun launchScreenShareFlow() {
+        val startProjection = {
+            mediaProjectionLauncher.launch(viewModel.createScreenCaptureIntent())
+        }
+        requestPermissionsAndRun(
+            requireMic = false,
+            includeNotifications = true,
+            onGranted = startProjection
+        )
     }
 
     // Automatically request all available safe autonomy permissions on first app entry
@@ -283,6 +328,25 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                 AppUiCommand.CheckUpdates -> {
                     updateBannerDismissed = false
                     viewModel.checkForUpdates()
+                }
+
+                AppUiCommand.RequestScreenShare -> {
+                    if (!screenShareState.isSharing) {
+                        launchScreenShareFlow()
+                    }
+                }
+
+                AppUiCommand.StopScreenShare -> {
+                    viewModel.stopScreenShare()
+                }
+
+                is AppUiCommand.StartSelfEvolution -> {
+                    currentTab = JarvisTab.TOOLS
+                    selectedToolsTab = 2
+                    selfEvolutionDraft = command.request
+                    if (command.request.isNotBlank() && settings.githubRepo.isNotBlank() && hasGitHubToken) {
+                        viewModel.generateSelfEvolutionProposal(command.request)
+                    }
                 }
 
                 is AppUiCommand.ShowGuidanceBanner -> {
@@ -416,6 +480,7 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                     lanServerState = lanServerState,
                                     voiceState = voiceState,
                                     liveVoiceState = liveVoiceState,
+                                    screenShareState = screenShareState,
                                     isTtsSpeaking = isTtsSpeaking,
                                     selectedMode = selectedConsoleMode,
                                     onSelectMode = { selectedConsoleMode = it },
@@ -447,6 +512,22 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                             viewModel.toggleBackgroundService()
                                         }
                                     },
+                                    onToggleScreenShare = {
+                                        if (screenShareState.isSharing) {
+                                            viewModel.stopScreenShare()
+                                        } else {
+                                            launchScreenShareFlow()
+                                        }
+                                    },
+                                    onAnalyzeScreenNow = {
+                                        viewModel.analyzeCurrentScreenNow()
+                                    },
+                                    onPickScreenshot = {
+                                        photoPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                    onClearScreenShareError = { viewModel.clearScreenShareError() },
                                     onStartLiveSession = {
                                         requestPermissionsAndRun(requireMic = true, includeNotifications = false) {
                                             viewModel.startLiveSession()
@@ -512,12 +593,35 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                     onBuildDefaultFdroidUrl = { viewModel.buildDefaultFdroidUrl(it) },
                                     onOpenGitHubRelease = { viewModel.openGitHubRelease(it) },
                                     onOpenInFdroid = { viewModel.openInFdroid(it) },
+                                    deviceSettingsSnapshot = deviceSettingsSnapshot,
+                                    onRefreshDeviceSettings = { viewModel.refreshDeviceSettings() },
+                                    onOpenWriteSettingsPermission = { viewModel.openWriteSettingsPermission() },
+                                    onOpenDndPermission = { viewModel.openDndAccessPermission() },
+                                    onSetDeviceBrightness = { viewModel.setDeviceBrightness(it) },
+                                    onSetDeviceVolume = { viewModel.setDeviceVolume(it) },
+                                    onToggleDeviceTorch = { viewModel.toggleDeviceTorch(it) },
+                                    onToggleDeviceAutoRotate = { viewModel.toggleDeviceAutoRotate(it) },
+                                    onToggleDeviceDnd = { viewModel.toggleDeviceDnd(it) },
+                                    onOpenDevicePanel = { viewModel.openDeviceSystemPanel(it) },
                                     onUpdateDarkTheme = { viewModel.updateDarkTheme(it) }
                                 )
 
                                 JarvisTab.TOOLS -> ToolsMemoryScreen(
                                     commands = commands,
                                     memories = memories,
+                                    selectedTabIndex = selectedToolsTab,
+                                    onSelectTabIndex = { selectedToolsTab = it },
+                                    githubRepo = settings.githubRepo,
+                                    hasGitHubToken = hasGitHubToken,
+                                    selfEvolutionState = selfEvolutionState,
+                                    selfEvolutionDraft = selfEvolutionDraft,
+                                    onSaveGitHubToken = { viewModel.saveGitHubDevToken(it) },
+                                    onClearGitHubToken = { viewModel.clearGitHubDevToken() },
+                                    onGenerateSelfEvolution = { viewModel.generateSelfEvolutionProposal(it) },
+                                    onApproveSelfEvolution = { viewModel.approveSelfEvolutionProposal(it) },
+                                    onResetSelfEvolution = { viewModel.resetSelfEvolution() },
+                                    onOpenGitHubUrl = { viewModel.openGitHubRelease(it) },
+                                    onGoToEnginesRepoConfig = { currentTab = JarvisTab.ENGINES },
                                     onAddCommand = { trigger, type, payload ->
                                         viewModel.addVoiceCommand(trigger, type, payload)
                                     },

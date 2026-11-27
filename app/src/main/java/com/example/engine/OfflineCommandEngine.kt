@@ -10,7 +10,9 @@ import com.example.core.AppDestination
 import com.example.core.AppIntegrationManager
 import com.example.core.AppSelfController
 import com.example.core.AppUiCommand
+import com.example.core.DeviceSettingsController
 import com.example.core.PermissionsManager
+import com.example.vision.ScreenVisionManager
 import com.example.data.MemoryDao
 import com.example.data.MemoryEntity
 import com.example.data.RoutingMode
@@ -41,7 +43,9 @@ class OfflineCommandEngine(
     private val settingsDataStore: SettingsDataStore,
     private val ollamaEngine: OllamaInferenceEngine,
     private val integrationManager: AppIntegrationManager,
-    private val appSelfController: AppSelfController
+    private val appSelfController: AppSelfController,
+    private val deviceSettingsController: DeviceSettingsController,
+    private val screenVisionManager: ScreenVisionManager
 ) {
 
     private fun normalize(text: String): String {
@@ -83,8 +87,12 @@ class OfflineCommandEngine(
         }
 
         // 2. Self-Navigation & Guided Self-Tour inside OpenJarvis
-        val selfNavResult = tryHandleSelfNavigation(clean)
+        val selfNavResult = tryHandleSelfNavigation(clean, rawInput)
         if (selfNavResult != null) return selfNavResult
+
+        // 2B. Real Device Settings Modifications (Brightness, Volume, Torch, Rotation, DND, Timeout, Panels)
+        val deviceSettingsResult = tryHandleDeviceSettings(clean)
+        if (deviceSettingsResult != null) return deviceSettingsResult
 
         // 3. External App Integrations (WhatsApp, Dialer, SMS, Maps, Spotify, YouTube, Calendar, Location, Launch App)
         val integrationResult = tryHandleAppIntegrations(rawInput, clean)
@@ -247,7 +255,7 @@ class OfflineCommandEngine(
         return OfflineMatchResult.NotMatched
     }
 
-    private suspend fun tryHandleSelfNavigation(clean: String): OfflineMatchResult? {
+    private suspend fun tryHandleSelfNavigation(clean: String, rawInput: String): OfflineMatchResult? {
         // Guided self-tour through OpenJarvis
         if (clean.contains("me guie") || clean.contains("guiar pelo app") || clean.contains("tour guiado") ||
             clean.contains("mostre o app") || clean.contains("apresente o app") || clean.contains("como funciona o app")
@@ -396,6 +404,166 @@ class OfflineCommandEngine(
                 responseText = "Nova sessão de conversa criada mantendo o histórico anterior salvo.",
                 toolName = "jarvis:sessoes"
             )
+        }
+
+        // Screen sharing start/stop triggers
+        if (clean.contains("parar compartilhamento") || clean.contains("parar de ver a tela") ||
+            clean.contains("encerrar compartilhamento") || clean.contains("desativar visao de tela")
+        ) {
+            appSelfController.emitCommand(AppUiCommand.StopScreenShare)
+            return OfflineMatchResult.Handled(
+                responseText = "Encerrando o compartilhamento de tela.",
+                toolName = "jarvis:visao-tela"
+            )
+        }
+
+        if (clean.contains("compartilhar tela") || clean.contains("ver minha tela") ||
+            clean.contains("espelhar tela") || clean.contains("ativar visao de tela")
+        ) {
+            appSelfController.emitCommand(AppUiCommand.RequestScreenShare)
+            return OfflineMatchResult.Handled(
+                responseText = "Solicitando permissão do Android para compartilhar sua tela. Assim que confirmar, posso identificar tudo o que você estiver visualizando.",
+                toolName = "jarvis:visao-tela"
+            )
+        }
+
+        // Self-evolution (GitHub PR auto-development) triggers
+        val evolvePrefixes = listOf(
+            "auto evoluir ", "autoevoluir ", "evoluir codigo ", "evolua seu codigo ",
+            "atualizar seu proprio codigo ", "desenvolva no app ", "modifique seu codigo "
+        )
+        val matchedEvolve = evolvePrefixes.firstOrNull { clean.startsWith(it) || clean.contains(it) }
+        if (matchedEvolve != null) {
+            val requestBody = rawInput.substringAfter("codigo ", rawInput.substringAfter("app ", rawInput)).trim()
+            appSelfController.emitCommand(AppUiCommand.NavigateTo(AppDestination.TOOLS))
+            appSelfController.emitCommand(AppUiCommand.StartSelfEvolution(requestBody))
+            return OfflineMatchResult.Handled(
+                responseText = "Abri o painel Auto-Dev em Comandos e iniciei a análise do seu repositório GitHub para gerar uma proposta de Pull Request revisável.",
+                toolName = "jarvis:auto-evolucao"
+            )
+        }
+
+        // If user asks what is on their screen while screen sharing is OFF and no frame exists
+        val asksAboutScreen = clean.contains("o que estou vendo") || clean.contains("o que tem na tela") ||
+            clean.contains("o que esta na tela") || clean.contains("identifique a tela") ||
+            clean.contains("analise minha tela") || clean.contains("leia minha tela")
+        if (asksAboutScreen && !screenVisionManager.state.value.hasFrame) {
+            appSelfController.emitCommand(AppUiCommand.RequestScreenShare)
+            return OfflineMatchResult.Handled(
+                responseText = "Para identificar o que está na sua tela, primeiro aceite a solicitação de compartilhamento de tela que abri agora. Depois toque em 'Analisar tela' ou pergunte novamente!",
+                toolName = "jarvis:visao-tela"
+            )
+        }
+
+        return null
+    }
+
+    private fun tryHandleDeviceSettings(clean: String): OfflineMatchResult? {
+        // Flashlight / Torch
+        if (clean.contains("lanterna") || clean.contains("flash")) {
+            val turnOff = clean.contains("desligar") || clean.contains("apagar") || clean.contains("desativar")
+            val res = deviceSettingsController.setTorchEnabled(!turnOff)
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+
+        // Brightness
+        if (clean.contains("brilho")) {
+            val res = when {
+                clean.contains("automatico") -> {
+                    val disable = clean.contains("desativar") || clean.contains("desligar") || clean.contains("tirar")
+                    deviceSettingsController.setAutoBrightness(!disable)
+                }
+                clean.contains("maximo") || clean.contains("100") -> deviceSettingsController.setBrightnessPercent(100)
+                clean.contains("minimo") -> deviceSettingsController.setBrightnessPercent(10)
+                clean.contains("aumentar") || clean.contains("subir") || clean.contains("mais brilho") ->
+                    deviceSettingsController.adjustBrightness(25)
+                clean.contains("diminuir") || clean.contains("baixar") || clean.contains("reduzir") || clean.contains("menos brilho") ->
+                    deviceSettingsController.adjustBrightness(-25)
+                else -> {
+                    val pct = Regex("(\\d{1,3})").find(clean)?.groupValues?.get(1)?.toIntOrNull()
+                    if (pct != null) deviceSettingsController.setBrightnessPercent(pct) else null
+                }
+            }
+            if (res != null) return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+
+        // Volume
+        if (clean.contains("volume") || clean == "mutar" || clean == "tirar som" || clean == "silenciar midia") {
+            val res = when {
+                clean.contains("painel") -> deviceSettingsController.openSystemPanelOrSettings("volume")
+                clean.contains("mutar") || clean.contains("mudo") || clean.contains("zero") || clean == "tirar som" ->
+                    deviceSettingsController.setMediaVolumePercent(0)
+                clean.contains("maximo") || clean.contains("100") -> deviceSettingsController.setMediaVolumePercent(100)
+                clean.contains("aumentar") || clean.contains("subir") || clean.contains("mais alto") ->
+                    deviceSettingsController.adjustMediaVolume(3)
+                clean.contains("diminuir") || clean.contains("baixar") || clean.contains("reduzir") || clean.contains("mais baixo") ->
+                    deviceSettingsController.adjustMediaVolume(-3)
+                else -> {
+                    val pct = Regex("(\\d{1,3})").find(clean)?.groupValues?.get(1)?.toIntOrNull()
+                    if (pct != null) deviceSettingsController.setMediaVolumePercent(pct) else null
+                }
+            }
+            if (res != null) return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+
+        // Ringer mode & Do Not Disturb
+        if (clean.contains("nao perturbe")) {
+            val disable = clean.contains("desativar") || clean.contains("desligar") || clean.contains("tirar")
+            val res = deviceSettingsController.setDoNotDisturb(!disable)
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+        if (clean.contains("modo silencioso") || clean.contains("colocar no silencioso") || clean.contains("deixar silencioso")) {
+            val res = deviceSettingsController.setRingerMode("silent")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+        if (clean.contains("modo vibrar") || clean.contains("colocar no vibrar")) {
+            val res = deviceSettingsController.setRingerMode("vibrate")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+        if (clean.contains("som normal") || clean.contains("tirar do silencioso") || clean.contains("ativar som")) {
+            val res = deviceSettingsController.setRingerMode("normal")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+
+        // Auto-rotation
+        if (clean.contains("rotacao") || clean.contains("girar tela")) {
+            val disable = clean.contains("desativar") || clean.contains("travar") || clean.contains("desligar") || clean.contains("bloquear")
+            val res = deviceSettingsController.setAutoRotate(!disable)
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+
+        // Screen timeout
+        if (clean.contains("tempo de tela") || clean.contains("bloqueio de tela")) {
+            val minMatch = Regex("(\\d+)\\s*(minuto|minutos|min)").find(clean)
+            val secMatch = Regex("(\\d+)\\s*(segundo|segundos|seg)").find(clean)
+            val seconds = (minMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0) * 60 +
+                (secMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0)
+            if (seconds > 0) {
+                val res = deviceSettingsController.setScreenTimeoutSeconds(seconds)
+                return OfflineMatchResult.Handled(res.message, res.toolName)
+            }
+        }
+
+        // System Settings Panels (Wi-Fi, Bluetooth, Battery, Location, Airplane mode)
+        if (clean.contains("painel wi-fi") || clean.contains("painel wifi") || clean.contains("configurar wifi") ||
+            clean.contains("configurar wi-fi") || clean.contains("ligar wifi") || clean.contains("desligar wifi")
+        ) {
+            val res = deviceSettingsController.openSystemPanelOrSettings("wifi")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+        if (clean.contains("painel bluetooth") || clean.contains("configurar bluetooth") ||
+            clean.contains("ligar bluetooth") || clean.contains("desligar bluetooth")
+        ) {
+            val res = deviceSettingsController.openSystemPanelOrSettings("bluetooth")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+        if (clean.contains("economia de bateria") || clean.contains("modo economia")) {
+            val res = deviceSettingsController.openSystemPanelOrSettings("bateria")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
+        }
+        if (clean.contains("modo aviao")) {
+            val res = deviceSettingsController.openSystemPanelOrSettings("aviao")
+            return OfflineMatchResult.Handled(res.message, res.toolName)
         }
 
         return null
@@ -598,15 +766,15 @@ class OfflineCommandEngine(
 
     companion object {
         val builtInExamples: List<Pair<String, String>> = listOf(
+            "Compartilhar tela" to "Inicia visão de tela ao vivo para o Jarvis ver o que você visualiza",
+            "O que estou vendo na tela?" to "Identifica e explica o conteúdo visível na tela com Gemini Vision",
+            "Brilho para 80%" to "Ajusta o brilho da tela diretamente nas configurações do Android",
+            "Ligar lanterna" to "Aciona ou desliga o flash LED do dispositivo por voz",
+            "Ativar não perturbe" to "Alterna o modo Não Perturbe ou modo silencioso do celular",
+            "Abrir painel Wi-Fi" to "Abre o painel interativo nativo de Internet e Wi-Fi do Android",
+            "Evoluir código adicionar modo foco" to "Abre o pipeline Auto-Dev para propor Pull Request no GitHub",
             "Me guie pelo app" to "Auto-tour guiado por voz pelas telas do OpenJarvis",
-            "Ir para Motores" to "Auto-navegação instantânea dentro do próprio app",
             "Abrir WhatsApp" to "Abre apps instalados ou envia mensagens via Contatos",
-            "Navegar para Avenida Paulista" to "Traça rota diretamente no Google Maps",
-            "Tocar lo-fi no Spotify" to "Reproduz busca de música no Spotify / mídia",
-            "Minha agenda hoje" to "Lê seus compromissos reais do calendário do Android",
-            "Onde estou?" to "Consulta localização GPS/rede e endereço aproximado",
-            "Ligar para Maria" to "Busca o contato na agenda e abre o discador",
-            "Definir alarme para 07:30" to "Dispara o AlarmClock nativo do sistema",
             "Status do sistema" to "Lê bateria, Wi-Fi/LAN, memórias e permissões ativas"
         )
     }

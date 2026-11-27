@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AddComment
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Close
@@ -41,8 +42,11 @@ import androidx.compose.material.icons.rounded.MicOff
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.StopScreenShare
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Wifi
@@ -100,6 +104,7 @@ import com.example.state.AssistantState
 import com.example.ui.StreamingUiState
 import com.example.ui.components.EngineBadge
 import com.example.ui.components.VoiceOrbVisualizer
+import com.example.vision.ScreenShareState
 import com.example.voice.LanServerState
 import com.example.voice.VoiceRuntimeState
 import java.text.SimpleDateFormat
@@ -117,6 +122,7 @@ fun ConsoleScreen(
     lanServerState: LanServerState,
     voiceState: VoiceRuntimeState,
     liveVoiceState: LiveVoiceState,
+    screenShareState: ScreenShareState,
     isTtsSpeaking: Boolean,
     selectedMode: Int,
     onSelectMode: (Int) -> Unit,
@@ -134,6 +140,10 @@ fun ConsoleScreen(
     onStartGuidedTour: () -> Unit,
     onMicClick: () -> Unit,
     onToggleBackground: () -> Unit,
+    onToggleScreenShare: () -> Unit,
+    onAnalyzeScreenNow: () -> Unit,
+    onPickScreenshot: () -> Unit,
+    onClearScreenShareError: () -> Unit,
     onStartLiveSession: () -> Unit,
     onStopLiveSession: () -> Unit,
     onClearChat: () -> Unit,
@@ -173,6 +183,17 @@ fun ConsoleScreen(
             networkState = networkState,
             assistantState = assistantState,
             lanServerState = lanServerState
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Real-Time Screen Sharing & Visual Analysis Strip
+        ScreenVisionControlStrip(
+            screenShareState = screenShareState,
+            onToggleScreenShare = onToggleScreenShare,
+            onAnalyzeScreenNow = onAnalyzeScreenNow,
+            onPickScreenshot = onPickScreenshot,
+            onClearError = onClearScreenShareError
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -349,14 +370,15 @@ fun ConsoleScreen(
                 }
             }
 
-            // Quick Offline, Integrations & Self-Navigation Chips
+            // Quick Offline, Vision, Device Settings & Self-Navigation Chips
             val quickPrompts = remember {
                 listOf(
+                    "O que estou vendo na tela?",
+                    "Aumentar brilho",
+                    "Ligar lanterna",
                     "Me guie pelo app",
                     "Status do sistema",
-                    "Minha agenda hoje",
-                    "Abrir WhatsApp",
-                    "Ir para Motores"
+                    "Abrir WhatsApp"
                 )
             }
             LazyRow(
@@ -458,6 +480,133 @@ fun ConsoleScreen(
                         imageVector = Icons.AutoMirrored.Rounded.Send,
                         contentDescription = stringResource(R.string.cd_send_message)
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScreenVisionControlStrip(
+    screenShareState: ScreenShareState,
+    onToggleScreenShare: () -> Unit,
+    onAnalyzeScreenNow: () -> Unit,
+    onPickScreenshot: () -> Unit,
+    onClearError: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (screenShareState.isSharing) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        border = BorderStroke(
+            1.dp,
+            if (screenShareState.isSharing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("screen_vision_strip")
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = if (screenShareState.isSharing) Icons.Rounded.Visibility else Icons.Rounded.ScreenShare,
+                    contentDescription = null,
+                    tint = if (screenShareState.isSharing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = if (screenShareState.isSharing) {
+                        "Tela ao vivo · Jarvis vendo"
+                    } else if (screenShareState.hasFrame) {
+                        "Captura pronta para análise"
+                    } else {
+                        "Visão de Tela"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (screenShareState.hasFrame) {
+                    FilledTonalButton(
+                        onClick = onAnalyzeScreenNow,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("analyze_screen_now_button")
+                    ) {
+                        Text("Analisar", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                IconButton(
+                    onClick = onPickScreenshot,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .testTag("pick_screenshot_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AddPhotoAlternate,
+                        contentDescription = stringResource(R.string.cd_pick_screenshot),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                FilledTonalButton(
+                    onClick = onToggleScreenShare,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    colors = if (screenShareState.isSharing) {
+                        ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    } else {
+                        ButtonDefaults.filledTonalButtonColors()
+                    },
+                    modifier = Modifier
+                        .height(34.dp)
+                        .testTag("toggle_screen_share_button")
+                ) {
+                    Icon(
+                        imageVector = if (screenShareState.isSharing) Icons.Rounded.StopScreenShare else Icons.Rounded.ScreenShare,
+                        contentDescription = stringResource(R.string.cd_share_screen),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (screenShareState.isSharing) "Parar" else "Compartilhar",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+
+            if (screenShareState.errorMessage != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = screenShareState.errorMessage,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = onClearError,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Fechar aviso", modifier = Modifier.size(14.dp))
+                    }
                 }
             }
         }

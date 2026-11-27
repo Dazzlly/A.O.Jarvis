@@ -1,6 +1,7 @@
 package com.example.engine
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -148,11 +149,25 @@ class NetworkEngineManager(
         memories: List<MemoryEntity>,
         settings: JarvisSettings,
         routingOverride: RoutingMode? = null,
-        selfAwarenessContext: String = ""
+        selfAwarenessContext: String = "",
+        attachedBitmap: Bitmap? = null
     ): Flow<InferenceStreamEvent> = flow {
         refreshNetworkState()
         val effectiveMode = routingOverride ?: settings.routingMode
         val networkSnapshot = _state.value
+
+        if (attachedBitmap != null && !attachedBitmap.isRecycled) {
+            updateActiveEngine(EngineType.GEMINI, "Visão de Tela Multimodal (Gemini Vision)")
+            geminiEngine.streamResponse(
+                prompt = prompt,
+                history = history,
+                memories = memories,
+                settings = settings,
+                selfAwarenessContext = selfAwarenessContext,
+                attachedBitmap = attachedBitmap
+            ).collect { emit(it) }
+            return@flow
+        }
 
         val targetEngine: EngineType = when (effectiveMode) {
             RoutingMode.OLLAMA -> EngineType.OLLAMA

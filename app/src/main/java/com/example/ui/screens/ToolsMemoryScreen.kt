@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.OfflineBolt
@@ -52,6 +53,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.core.EvolutionProposal
+import com.example.core.SelfEvolutionState
 import com.example.data.MemoryEntity
 import com.example.data.VoiceCommandEntity
 import com.example.engine.OfflineCommandEngine
@@ -60,6 +63,19 @@ import com.example.engine.OfflineCommandEngine
 fun ToolsMemoryScreen(
     commands: List<VoiceCommandEntity>,
     memories: List<MemoryEntity>,
+    selectedTabIndex: Int,
+    onSelectTabIndex: (Int) -> Unit,
+    githubRepo: String,
+    hasGitHubToken: Boolean,
+    selfEvolutionState: SelfEvolutionState,
+    selfEvolutionDraft: String,
+    onSaveGitHubToken: (String) -> Boolean,
+    onClearGitHubToken: () -> Unit,
+    onGenerateSelfEvolution: (String) -> Unit,
+    onApproveSelfEvolution: (EvolutionProposal) -> Unit,
+    onResetSelfEvolution: () -> Unit,
+    onOpenGitHubUrl: (String) -> Result<String>,
+    onGoToEnginesRepoConfig: () -> Unit,
     onAddCommand: (String, String, String) -> Unit,
     onToggleCommand: (VoiceCommandEntity) -> Unit,
     onDeleteCommand: (Long) -> Unit,
@@ -68,7 +84,6 @@ fun ToolsMemoryScreen(
     onDeleteMemory: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var tabIndex by rememberSaveable { mutableIntStateOf(0) }
     var showAddCommandDialog by remember { mutableStateOf(false) }
     var showAddMemoryDialog by remember { mutableStateOf(false) }
 
@@ -95,15 +110,17 @@ fun ToolsMemoryScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            FilledTonalButton(
-                onClick = {
-                    if (tabIndex == 0) showAddCommandDialog = true else showAddMemoryDialog = true
-                },
-                modifier = Modifier.testTag("tools_add_button")
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(if (tabIndex == 0) "Comando" else "Memória")
+            if (selectedTabIndex < 2) {
+                FilledTonalButton(
+                    onClick = {
+                        if (selectedTabIndex == 0) showAddCommandDialog = true else showAddMemoryDialog = true
+                    },
+                    modifier = Modifier.testTag("tools_add_button")
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (selectedTabIndex == 0) "Comando" else "Memória")
+                }
             }
         }
 
@@ -111,24 +128,31 @@ fun ToolsMemoryScreen(
 
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             SegmentedButton(
-                selected = tabIndex == 0,
-                onClick = { tabIndex = 0 },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                icon = { Icon(Icons.Rounded.OfflineBolt, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                label = { Text(stringResource(R.string.tools_tab_commands)) }
+                selected = selectedTabIndex == 0,
+                onClick = { onSelectTabIndex(0) },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
+                icon = { Icon(Icons.Rounded.OfflineBolt, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text(stringResource(R.string.tools_tab_commands), maxLines = 1) }
             )
             SegmentedButton(
-                selected = tabIndex == 1,
-                onClick = { tabIndex = 1 },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                icon = { Icon(Icons.Rounded.Memory, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                label = { Text("${stringResource(R.string.tools_tab_memories)} (${memories.size})") }
+                selected = selectedTabIndex == 1,
+                onClick = { onSelectTabIndex(1) },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
+                icon = { Icon(Icons.Rounded.Memory, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text("${stringResource(R.string.tools_tab_memories)} (${memories.size})", maxLines = 1) }
+            )
+            SegmentedButton(
+                selected = selectedTabIndex == 2,
+                onClick = { onSelectTabIndex(2) },
+                shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                icon = { Icon(Icons.Rounded.Code, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                label = { Text(stringResource(R.string.tools_tab_autodev), maxLines = 1) }
             )
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        if (tabIndex == 0) {
+        if (selectedTabIndex == 0) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp),
@@ -208,7 +232,7 @@ fun ToolsMemoryScreen(
                     }
                 }
             }
-        } else {
+        } else if (selectedTabIndex == 1) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp),
@@ -278,6 +302,20 @@ fun ToolsMemoryScreen(
                     }
                 }
             }
+        } else {
+            SelfEvolutionPanel(
+                githubRepo = githubRepo,
+                hasGitHubToken = hasGitHubToken,
+                evolutionState = selfEvolutionState,
+                initialDraftRequest = selfEvolutionDraft,
+                onSaveGitHubToken = onSaveGitHubToken,
+                onClearGitHubToken = onClearGitHubToken,
+                onGenerateProposal = onGenerateSelfEvolution,
+                onApproveProposal = onApproveSelfEvolution,
+                onResetEvolution = onResetSelfEvolution,
+                onOpenGitHubUrl = onOpenGitHubUrl,
+                onGoToEnginesRepoConfig = onGoToEnginesRepoConfig
+            )
         }
     }
 
