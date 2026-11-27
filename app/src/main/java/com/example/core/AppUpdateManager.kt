@@ -134,7 +134,7 @@ class AppUpdateManager(context: Context) {
             val request = Request.Builder()
                 .url(apiUrl)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "OpenJarvis-Android/${BuildConfig.VERSION_NAME}")
+                .header("User-Agent", "A.O.Jarvis-Android/${BuildConfig.VERSION_NAME}")
                 .get()
                 .build()
 
@@ -289,7 +289,7 @@ class AppUpdateManager(context: Context) {
             val probeUrl = "$httpsBase/$indexFile"
             val req = Request.Builder()
                 .url(probeUrl)
-                .header("User-Agent", "OpenJarvis-Android/${BuildConfig.VERSION_NAME}")
+                .header("User-Agent", "A.O.Jarvis-Android/${BuildConfig.VERSION_NAME}")
                 .get()
                 .build()
             try {

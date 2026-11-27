@@ -392,7 +392,7 @@ fun RemoteUpdateCard(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 val activeFdroidUrl = fdroidUrlDraft.trim().ifBlank {
-                                    onBuildDefaultFdroidUrl(githubRepoDraft)
+                                    onBuildRawFdroidUrl(githubRepoDraft)
                                 }
                                 if (activeFdroidUrl.isNotBlank()) {
                                     Button(

@@ -215,7 +215,7 @@ fun OpenJarvisApp(
             if (grantedNow > 0) {
                 Toast.makeText(
                     context,
-                    "$grantedNow permissão(ões) de autonomia ativada(s) para o OpenJarvis.",
+                    "$grantedNow permissão(ões) de autonomia ativada(s) para o A.O.Jarvis.",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -232,7 +232,7 @@ fun OpenJarvisApp(
             viewModel.startScreenShare(result.resultCode, data)
             Toast.makeText(
                 context,
-                "Compartilhamento de tela ativo! Pergunte ao OpenJarvis sobre o que estiver vendo.",
+                "Compartilhamento de tela ativo! Pergunte ao A.O.Jarvis sobre o que estiver vendo.",
                 Toast.LENGTH_LONG
             ).show()
         } else {

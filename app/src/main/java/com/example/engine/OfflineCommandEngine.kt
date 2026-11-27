@@ -359,7 +359,7 @@ class OfflineCommandEngine(
                 clean.contains("console") || clean.contains("tela inicial") || clean.contains("chat") -> {
                     appSelfController.emitCommand(AppUiCommand.NavigateTo(AppDestination.CONSOLE, "Indo para Console"))
                     return OfflineMatchResult.Handled(
-                        responseText = "De volta ao Console principal do OpenJarvis.",
+                        responseText = "De volta ao Console principal do A.O.Jarvis.",
                         toolName = "jarvis:auto-navegacao"
                     )
                 }
@@ -428,7 +428,7 @@ class OfflineCommandEngine(
         if (clean.contains("ativar segundo plano") || clean.contains("ativar background") || clean.contains("ligar escuta continua")) {
             appSelfController.emitCommand(AppUiCommand.ToggleBackgroundService(shouldRun = true))
             return OfflineMatchResult.Handled(
-                responseText = "Iniciando o serviço contínuo do OpenJarvis em segundo plano.",
+                responseText = "Iniciando o serviço contínuo do A.O.Jarvis em segundo plano.",
                 toolName = "jarvis:auto-controle"
             )
         }
@@ -436,7 +436,7 @@ class OfflineCommandEngine(
         if (clean.contains("desativar segundo plano") || clean.contains("parar background")) {
             appSelfController.emitCommand(AppUiCommand.ToggleBackgroundService(shouldRun = false))
             return OfflineMatchResult.Handled(
-                responseText = "Encerrando o serviço em segundo plano do OpenJarvis.",
+                responseText = "Encerrando o serviço em segundo plano do A.O.Jarvis.",
                 toolName = "jarvis:auto-controle"
             )
         }
@@ -854,7 +854,7 @@ class OfflineCommandEngine(
             "Ativar não perturbe" to "Alterna o modo Não Perturbe ou modo silencioso do celular",
             "Abrir painel Wi-Fi" to "Abre o painel interativo nativo de Internet e Wi-Fi do Android",
             "Evoluir código adicionar modo foco" to "Abre o pipeline Auto-Dev para propor Pull Request no GitHub",
-            "Me guie pelo app" to "Auto-tour guiado por voz pelas telas do OpenJarvis",
+            "Me guie pelo app" to "Auto-tour guiado por voz pelas telas do A.O.Jarvis",
             "Abrir WhatsApp" to "Abre apps instalados ou envia mensagens via Contatos",
             "Status do sistema" to "Lê bateria, Wi-Fi/LAN, memórias e permissões ativas"
         )

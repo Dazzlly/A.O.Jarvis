@@ -73,7 +73,7 @@ data class JarvisSettings(
     val ollamaBaseUrl: String = "http://192.168.1.100:11434",
     val ollamaModel: String = "llama3.2",
     val temperature: Float = 0.6f,
-    val systemPrompt: String = "Você é o OpenJarvis, um assistente pessoal de IA local-first e inteligente rodando no Android. Seja preciso, claro e objetivo em português do Brasil, otimizado tanto para leitura quanto para resposta falada por voz.",
+    val systemPrompt: String = "Você é o A.O.Jarvis, um assistente pessoal de IA local-first e inteligente rodando no Android. Seja preciso, claro e objetivo em português do Brasil, otimizado tanto para leitura quanto para resposta falada por voz.",
     val wakeWordEnabled: Boolean = true,
     val wakeWord: String = "hey jarvis",
     val audioRecordWakeWordEnabled: Boolean = true,

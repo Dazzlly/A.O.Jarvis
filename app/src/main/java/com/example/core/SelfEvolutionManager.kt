@@ -165,7 +165,7 @@ class SelfEvolutionManager(
     ): SelfEvolutionState = withContext(Dispatchers.IO) {
         val requestText = userRequest.trim()
         if (requestText.isBlank()) {
-            val err = SelfEvolutionState.Error("Descreva qual melhoria ou recurso deseja que o OpenJarvis desenvolva.")
+            val err = SelfEvolutionState.Error("Descreva qual melhoria ou recurso deseja que o A.O.Jarvis desenvolva.")
             _state.value = err
             return@withContext err
         }
@@ -247,9 +247,9 @@ class SelfEvolutionManager(
                 ?: throw IllegalStateException("O Gemini retornou uma resposta vazia.")
 
             val parsed = JSONObject(rawJson)
-            val prTitle = parsed.optString("prTitle", "OpenJarvis Auto-Evolução").trim().take(90)
+            val prTitle = parsed.optString("prTitle", "A.O.Jarvis Auto-Evolução").trim().take(90)
             val commitMsg = parsed.optString("commitMessage", "feat: auto-evolução solicitada pelo usuário").trim().take(120)
-            val summary = parsed.optString("summary", "Alterações propostas pelo OpenJarvis.").trim()
+            val summary = parsed.optString("summary", "Alterações propostas pelo A.O.Jarvis.").trim()
             val suggestedTag = parsed.optString("suggestedNextTag", "").trim().ifBlank { null }
 
             val filesArray = parsed.optJSONArray("files") ?: JSONArray()
@@ -373,7 +373,7 @@ class SelfEvolutionManager(
 
                 _state.value = SelfEvolutionState.Working("Abrindo Pull Request no GitHub…")
                 val prBodyText = buildString {
-                    append("## Auto-Evolução gerada pelo OpenJarvis\n\n")
+                    append("## Auto-Evolução gerada pelo A.O.Jarvis\n\n")
                     append(proposal.summary)
                     append("\n\n### Arquivos alterados\n")
                     proposal.fileChanges.forEach { fc ->
@@ -446,7 +446,7 @@ class SelfEvolutionManager(
         allPaths: List<String>,
         loadedFiles: Map<String, String>
     ): String = buildString {
-        append("Você é o engenheiro sênior Android (Kotlin + Jetpack Compose + Material 3) responsável pela auto-evolução do aplicativo OpenJarvis ($repoSlug).\n")
+        append("Você é o engenheiro sênior Android (Kotlin + Jetpack Compose + Material 3) responsável pela auto-evolução do aplicativo A.O.Jarvis ($repoSlug).\n")
         append("Pedido do usuário para evoluir o código do app:\n\"$userRequest\"\n\n")
         append("Regras obrigatórias:\n")
         append("1. Retorne apenas alterações válidas, compiláveis em Kotlin/Compose, preservando todos os imports e código existente.\n")
@@ -469,7 +469,7 @@ class SelfEvolutionManager(
             .header("Accept", "application/vnd.github+json")
             .header("Authorization", "Bearer $token")
             .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "OpenJarvis-Android")
+            .header("User-Agent", "A.O.Jarvis-Android")
             .get()
             .build()
         return executeJsonRequest(req)
@@ -488,7 +488,7 @@ class SelfEvolutionManager(
             .header("Accept", "application/vnd.github+json")
             .header("Authorization", "Bearer $token")
             .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "OpenJarvis-Android")
+            .header("User-Agent", "A.O.Jarvis-Android")
 
         when (method.uppercase()) {
             "POST" -> builder.post(requestBody)

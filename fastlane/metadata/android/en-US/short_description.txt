@@ -1,0 +1,1 @@
+Android voice assistant with Gemini, local Wi-Fi Ollama, and offline voice mode.

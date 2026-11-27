@@ -1,0 +1,8 @@
+A.O.Jarvis is a local-first Android personal voice assistant combining Gemini Cloud (via Firebase AI Logic), a local Ollama server over Wi-Fi, and offline voice commands.
+
+Key features:
+- Native Android SpeechRecognizer with offline support, lightweight "Hey Jarvis" AudioRecord wake-word detection, and customizable Text-to-Speech (TTS).
+- Persistent Foreground Service with wake-word standby, battery monitoring, and authenticated local Wi-Fi LAN triggers.
+- Seamless routing between Gemini Cloud, Gemini Live, and local Ollama over Wi-Fi.
+- Local Room database for voice command history, offline commands, memories, and multi-session conversations.
+- Remote update delivery via GitHub Releases and official F-Droid repository.

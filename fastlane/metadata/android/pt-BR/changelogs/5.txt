@@ -1,0 +1,5 @@
+- v1.3.1 (build 5):
+- Correção urgente da entrega de atualizações no F-Droid: eliminação definitiva do erro "IOException: Hash not matching" com nomes de APK versionados por SHA-256, remoção de espelho inválido e validação estrita de integridade do índice antes da publicação.
+- Persistência estável da chave de assinatura do repositório F-Droid entre builds para garantir detecção imediata de novas versões no cliente F-Droid.
+- Limpeza completa de versões duplicadas (1.0), remoção de vestígios do nome antigo e unificação do ícone oficial Tron Data Disc no aplicativo e nos metadados F-Droid/Fastlane.
+- Publicação automática de GitHub Releases também em pushes na branch principal para sincronização imediata do verificador interno de atualizações.

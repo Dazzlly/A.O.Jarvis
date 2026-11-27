@@ -108,7 +108,7 @@ fun SelfEvolutionPanel(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Por segurança do Android, apps não reescrevem binários diretamente no celular. Em vez disso, o OpenJarvis lê seu código no GitHub, usa Gemini para propor melhorias, mostra a revisão aqui e — somente após sua aprovação — abre um Pull Request real no GitHub para compilar e entregar via F-Droid.",
+                        text = "Por segurança do Android, apps não reescrevem binários diretamente no celular. Em vez disso, o A.O.Jarvis lê seu código no GitHub, usa Gemini para propor melhorias, mostra a revisão aqui e — somente após sua aprovação — abre um Pull Request real no GitHub para compilar e entregar via F-Droid.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -235,7 +235,7 @@ fun SelfEvolutionPanel(
                     OutlinedTextField(
                         value = evolutionRequest,
                         onValueChange = { evolutionRequest = it },
-                        label = { Text("O que o OpenJarvis deve desenvolver ou melhorar no código?") },
+                        label = { Text("O que o A.O.Jarvis deve desenvolver ou melhorar no código?") },
                         placeholder = { Text("Ex.: Adicionar um comando offline 'modo trabalho' que reduz brilho e ativa Não Perturbe") },
                         minLines = 3,
                         maxLines = 5,

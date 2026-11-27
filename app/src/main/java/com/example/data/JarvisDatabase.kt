@@ -138,7 +138,7 @@ abstract class JarvisDatabase : RoomDatabase() {
                 VoiceCommandEntity(
                     triggerPhrase = "modo foco",
                     actionType = "OFFLINE_RESPONSE",
-                    actionPayload = "Modo foco ativado localmente. Notificações minimizadas e OpenJarvis pronto em modo silencioso."
+                    actionPayload = "Modo foco ativado localmente. Notificações minimizadas e A.O.Jarvis pronto em modo silencioso."
                 )
             )
             commandDao.insertCommand(
@@ -163,7 +163,7 @@ abstract class JarvisDatabase : RoomDatabase() {
             memoryDao.insertMemory(
                 MemoryEntity(
                     key = "Idioma & Estilo",
-                    content = "Responder sempre em português do Brasil, de forma técnica, concisa e direta, no estilo do OpenJarvis.",
+                    content = "Responder sempre em português do Brasil, de forma técnica, concisa e direta, no estilo do A.O.Jarvis.",
                     category = "Preferência"
                 )
             )

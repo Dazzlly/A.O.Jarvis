@@ -640,7 +640,7 @@ fun EnginesScreen(
                 OutlinedTextField(
                     value = systemPromptDraft,
                     onValueChange = { systemPromptDraft = it },
-                    label = { Text("Instrução de sistema do agente OpenJarvis") },
+                    label = { Text("Instrução de sistema do agente A.O.Jarvis") },
                     minLines = 2,
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth()
@@ -1121,7 +1121,7 @@ fun EnginesScreen(
                                 onClick = {
                                     if (token.isNotBlank()) {
                                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        cm.setPrimaryClip(ClipData.newPlainText("OpenJarvis LAN Token", token))
+                                        cm.setPrimaryClip(ClipData.newPlainText("A.O.Jarvis LAN Token", token))
                                         Toast.makeText(context, "Token LAN copiado", Toast.LENGTH_SHORT).show()
                                     }
                                 },
@@ -1176,7 +1176,7 @@ fun EnginesScreen(
                                 onClick = {
                                     val actualCurl = "curl -X POST $endpoint -H \"X-Jarvis-Token: $token\" -H \"Content-Type: application/json\" -d '{\"prompt\":\"Status do sistema\",\"speak\":true}'"
                                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("OpenJarvis LAN Curl", actualCurl))
+                                    cm.setPrimaryClip(ClipData.newPlainText("A.O.Jarvis LAN Curl", actualCurl))
                                     Toast.makeText(context, "Comando curl copiado", Toast.LENGTH_SHORT).show()
                                 },
                                 modifier = Modifier.testTag("copy_lan_curl_button")

@@ -1,4 +1,4 @@
-OpenJarvis é um assistente pessoal Android com arquitetura local-first que une Gemini Cloud (via Firebase AI Logic), servidor Ollama rodando no seu computador na rede Wi-Fi local e comandos de voz offline.
+A.O.Jarvis é um assistente pessoal Android com arquitetura local-first que une Gemini Cloud (via Firebase AI Logic), servidor Ollama rodando no seu computador na rede Wi-Fi local e comandos de voz offline.
 
 Principais recursos:
 - Reconhecimento de voz nativo do Android (SpeechRecognizer) com suporte offline e resposta falada (TTS).

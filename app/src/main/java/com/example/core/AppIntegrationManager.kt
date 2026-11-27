@@ -344,7 +344,7 @@ class AppIntegrationManager(private val context: Context) {
         val end = start + 60 * 60 * 1000L
         val intent = Intent(Intent.ACTION_INSERT).apply {
             data = CalendarContract.Events.CONTENT_URI
-            putExtra(CalendarContract.Events.TITLE, title.trim().ifBlank { "Compromisso OpenJarvis" })
+            putExtra(CalendarContract.Events.TITLE, title.trim().ifBlank { "Compromisso A.O.Jarvis" })
             putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, start)
             putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

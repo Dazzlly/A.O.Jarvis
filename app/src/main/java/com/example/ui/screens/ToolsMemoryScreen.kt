@@ -111,7 +111,7 @@ fun ToolsMemoryScreen(
                     style = MaterialTheme.typography.headlineMedium
                 )
                 Text(
-                    text = "Ferramentas locais, webhooks LAN e contexto persistente do OpenJarvis.",
+                    text = "Ferramentas locais, webhooks LAN e contexto persistente do A.O.Jarvis.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
