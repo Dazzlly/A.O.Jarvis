@@ -14,6 +14,7 @@ import com.example.core.AppUiCommand
 import com.example.core.AppUpdateState
 import com.example.core.DeviceSettingsSnapshot
 import com.example.core.EvolutionProposal
+import com.example.core.FdroidRepoCheckState
 import com.example.core.GuidedTourState
 import com.example.core.IntegrationResult
 import com.example.core.SelfEvolutionState
@@ -131,6 +132,7 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
     val guidedTour: StateFlow<GuidedTourState> = appSelfController.guidedTour
     val uiCommands: SharedFlow<AppUiCommand> = appSelfController.uiCommands
     val updateState: StateFlow<AppUpdateState> = appUpdateManager.state
+    val fdroidRepoStatus: StateFlow<FdroidRepoCheckState> = appUpdateManager.fdroidStatus
     val currentVersionLabel: String =
         "v${appUpdateManager.currentVersionName} (build ${appUpdateManager.currentVersionCode})"
     val screenShareState: StateFlow<ScreenShareState> = screenVisionManager.state
@@ -574,8 +576,18 @@ class OpenJarvisViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun buildRawFdroidUrl(githubRepo: String): String {
+        return appUpdateManager.buildRawGitHubFdroidUrl(githubRepo)
+    }
+
     fun buildDefaultFdroidUrl(githubRepo: String): String {
         return appUpdateManager.buildDefaultFdroidPagesUrl(githubRepo)
+    }
+
+    fun verifyFdroidRepo(url: String) {
+        viewModelScope.launch {
+            appUpdateManager.verifyFdroidRepo(url)
+        }
     }
 
     fun openGitHubRelease(url: String): Result<String> {

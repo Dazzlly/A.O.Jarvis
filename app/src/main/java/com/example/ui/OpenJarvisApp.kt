@@ -116,6 +116,7 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
     val ollamaHealth by viewModel.ollamaHealth.collectAsStateWithLifecycle()
     val isProbingOllama by viewModel.isProbingOllama.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+    val fdroidRepoStatus by viewModel.fdroidRepoStatus.collectAsStateWithLifecycle()
     val screenShareState by viewModel.screenShareState.collectAsStateWithLifecycle()
     val deviceSettingsSnapshot by viewModel.deviceSettingsSnapshot.collectAsStateWithLifecycle()
     val selfEvolutionState by viewModel.selfEvolutionState.collectAsStateWithLifecycle()
@@ -437,7 +438,7 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                         AnimatedVisibility(visible = availableUpdate != null && !updateBannerDismissed) {
                             if (availableUpdate != null) {
                                 val fdroidUrl = settings.fdroidRepoUrl.ifBlank {
-                                    viewModel.buildDefaultFdroidUrl(settings.githubRepo)
+                                    viewModel.buildRawFdroidUrl(settings.githubRepo)
                                 }
                                 UpdateAvailableBanner(
                                     tagName = availableUpdate.release.tagName,
@@ -582,6 +583,7 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                         }
                                     },
                                     updateState = updateState,
+                                    fdroidRepoStatus = fdroidRepoStatus,
                                     currentVersionLabel = viewModel.currentVersionLabel,
                                     onUpdateRemoteUpdateConfig = { repo, fdroidUrl, autoCheck ->
                                         viewModel.updateRemoteUpdateConfig(repo, fdroidUrl, autoCheck)
@@ -590,6 +592,8 @@ fun OpenJarvisApp(viewModel: OpenJarvisViewModel) {
                                         updateBannerDismissed = false
                                         viewModel.checkForUpdates(it)
                                     },
+                                    onVerifyFdroidRepo = { viewModel.verifyFdroidRepo(it) },
+                                    onBuildRawFdroidUrl = { viewModel.buildRawFdroidUrl(it) },
                                     onBuildDefaultFdroidUrl = { viewModel.buildDefaultFdroidUrl(it) },
                                     onOpenGitHubRelease = { viewModel.openGitHubRelease(it) },
                                     onOpenInFdroid = { viewModel.openInFdroid(it) },

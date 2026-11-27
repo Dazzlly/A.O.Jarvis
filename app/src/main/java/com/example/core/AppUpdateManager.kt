@@ -50,6 +50,18 @@ sealed interface AppUpdateState {
     data class Error(val message: String) : AppUpdateState
 }
 
+sealed interface FdroidRepoCheckState {
+    data object Idle : FdroidRepoCheckState
+    data object Checking : FdroidRepoCheckState
+    data class Valid(
+        val indexFile: String,
+        val sizeBytes: Int,
+        val verifiedUrl: String
+    ) : FdroidRepoCheckState
+
+    data class Invalid(val message: String) : FdroidRepoCheckState
+}
+
 /**
  * Gerenciador de atualizações remotas compatível com GitHub Releases e F-Droid.
  *
@@ -69,6 +81,9 @@ class AppUpdateManager(context: Context) {
 
     private val _state = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     val state: StateFlow<AppUpdateState> = _state.asStateFlow()
+
+    private val _fdroidStatus = MutableStateFlow<FdroidRepoCheckState>(FdroidRepoCheckState.Idle)
+    val fdroidStatus: StateFlow<FdroidRepoCheckState> = _fdroidStatus.asStateFlow()
 
     val currentVersionName: String get() = BuildConfig.VERSION_NAME
     val currentVersionCode: Int get() = BuildConfig.VERSION_CODE
@@ -241,12 +256,105 @@ class AppUpdateManager(context: Context) {
         }
     }
 
+    /**
+     * Verifica previamente se a URL informada realmente serve um índice F-Droid válido
+     * (entry.jar ou index-v1.jar com assinatura ZIP/JAR não vazia), evitando o erro
+     * "ClosedByteChannelException: required 10 bytes but only 0 available" no app F-Droid.
+     */
+    suspend fun verifyFdroidRepo(rawRepoUrl: String): FdroidRepoCheckState = withContext(Dispatchers.IO) {
+        val validated = validateHttpsUrl(rawRepoUrl).getOrElse { err ->
+            val invalid = FdroidRepoCheckState.Invalid(err.message ?: "URL do repositório F-Droid inválida.")
+            _fdroidStatus.value = invalid
+            return@withContext invalid
+        }
+
+        val httpsBase = validated
+            .replaceFirst("fdroidrepos://", "https://")
+            .substringBefore("?")
+            .trimEnd('/')
+
+        if (httpsBase.startsWith("https://github.com/")) {
+            val invalid = FdroidRepoCheckState.Invalid(
+                "Não use a URL da página do código (github.com). Use o botão 'URL Raw (Sem Pages)' ou 'URL GitHub Pages' que termina em /fdroid/repo."
+            )
+            _fdroidStatus.value = invalid
+            return@withContext invalid
+        }
+
+        _fdroidStatus.value = FdroidRepoCheckState.Checking
+        val candidates = listOf("entry.jar", "index-v1.jar")
+        var lastHttpCode = 0
+
+        for (indexFile in candidates) {
+            val probeUrl = "$httpsBase/$indexFile"
+            val req = Request.Builder()
+                .url(probeUrl)
+                .header("User-Agent", "OpenJarvis-Android/${BuildConfig.VERSION_NAME}")
+                .get()
+                .build()
+            try {
+                httpClient.newCall(req).execute().use { resp ->
+                    lastHttpCode = resp.code
+                    if (resp.isSuccessful) {
+                        val headerBytes = resp.body?.byteStream()?.use { stream ->
+                            val buf = ByteArray(64)
+                            var readTotal = 0
+                            while (readTotal < buf.size) {
+                                val r = stream.read(buf, readTotal, buf.size - readTotal)
+                                if (r == -1) break
+                                readTotal += r
+                            }
+                            buf.copyOf(readTotal)
+                        } ?: ByteArray(0)
+
+                        val contentLen = resp.body?.contentLength()?.toInt() ?: headerBytes.size
+                        // Valid JAR/ZIP starts with 'P' (0x50) 'K' (0x4B) and is non-empty
+                        val isZipMagic = headerBytes.size >= 4 &&
+                            headerBytes[0] == 0x50.toByte() &&
+                            headerBytes[1] == 0x4B.toByte()
+                        if (isZipMagic) {
+                            val ok = FdroidRepoCheckState.Valid(
+                                indexFile = indexFile,
+                                sizeBytes = if (contentLen > 0) contentLen else headerBytes.size,
+                                verifiedUrl = httpsBase
+                            )
+                            _fdroidStatus.value = ok
+                            return@withContext ok
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "F-Droid probe failed for $probeUrl: ${e.message}")
+            }
+        }
+
+        val reason = when (lastHttpCode) {
+            404 -> "Índice F-Droid não encontrado nesta URL (HTTP 404). Confirme que o repositório GitHub é público e que o workflow 'Build APK, GitHub Release & F-Droid Repo' na aba Actions concluiu com sucesso."
+            403 -> "Acesso negado (HTTP 403). O repositório GitHub precisa ser Público para o F-Droid baixar o índice."
+            0 -> "Sem resposta do servidor. Verifique sua conexão ou se a URL termina em /fdroid/repo."
+            else -> "A URL respondeu HTTP $lastHttpCode sem um índice F-Droid válido (entry.jar / index-v1.jar). Rode o workflow no GitHub Actions primeiro."
+        }
+        val invalid = FdroidRepoCheckState.Invalid(reason)
+        _fdroidStatus.value = invalid
+        invalid
+    }
+
     fun openInFdroid(rawRepoUrl: String): Result<String> {
         val validated = validateHttpsUrl(rawRepoUrl).getOrElse { return Result.failure(it) }
-        val fdroidDeepLink = if (validated.startsWith("fdroidrepos://")) {
-            validated
+        val normalized = validated.trimEnd('/')
+        if (normalized.startsWith("https://github.com/") || normalized.startsWith("fdroidrepos://github.com/")) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "Use a URL /fdroid/repo (Raw GitHub ou GitHub Pages), não a URL principal github.com."
+                )
+            )
+        }
+        val fdroidDeepLink = if (normalized.startsWith("fdroidrepos://")) {
+            normalized
         } else {
-            validated.replaceFirst("https://", "fdroidrepos://")
+            normalized.replaceFirst("https://", "fdroidrepos://")
         }
 
         // 1. Try opening directly in F-Droid client app
@@ -259,7 +367,7 @@ class AppUpdateManager(context: Context) {
         }
 
         // 2. Fallback to HTTPS repository link in browser
-        val httpsFallback = validated.replaceFirst("fdroidrepos://", "https://")
+        val httpsFallback = normalized.replaceFirst("fdroidrepos://", "https://")
         val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(httpsFallback)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -271,10 +379,16 @@ class AppUpdateManager(context: Context) {
         }
     }
 
+    fun buildRawGitHubFdroidUrl(rawGitHubRepo: String): String {
+        val slug = normalizeGitHubRepo(rawGitHubRepo)
+        if (!isValidGitHubRepo(slug)) return ""
+        return "https://raw.githubusercontent.com/$slug/gh-pages/fdroid/repo"
+    }
+
     fun buildDefaultFdroidPagesUrl(rawGitHubRepo: String): String {
         val slug = normalizeGitHubRepo(rawGitHubRepo)
         if (!isValidGitHubRepo(slug)) return ""
-        val owner = slug.substringBefore("/")
+        val owner = slug.substringBefore("/").lowercase()
         val repo = slug.substringAfter("/")
         return "https://$owner.github.io/$repo/fdroid/repo"
     }

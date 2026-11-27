@@ -77,6 +77,7 @@ import com.example.R
 import com.example.core.AppUpdateState
 import com.example.core.AutonomyPermissionItem
 import com.example.core.DeviceSettingsSnapshot
+import com.example.core.FdroidRepoCheckState
 import com.example.core.IntegrationResult
 import com.example.data.JarvisSettings
 import com.example.data.RoutingMode
@@ -151,9 +152,12 @@ fun EnginesScreen(
     onRegenerateLanToken: () -> Unit,
     onToggleBackgroundService: () -> Unit,
     updateState: AppUpdateState,
+    fdroidRepoStatus: FdroidRepoCheckState,
     currentVersionLabel: String,
     onUpdateRemoteUpdateConfig: (String, String, Boolean) -> Unit,
     onCheckForUpdates: (String?) -> Unit,
+    onVerifyFdroidRepo: (String) -> Unit,
+    onBuildRawFdroidUrl: (String) -> String,
     onBuildDefaultFdroidUrl: (String) -> String,
     onOpenGitHubRelease: (String) -> Result<String>,
     onOpenInFdroid: (String) -> Result<String>,
@@ -1059,8 +1063,11 @@ fun EnginesScreen(
                 settings = settings,
                 currentVersionLabel = currentVersionLabel,
                 updateState = updateState,
+                fdroidRepoStatus = fdroidRepoStatus,
                 onUpdateRemoteConfig = onUpdateRemoteUpdateConfig,
                 onCheckForUpdates = onCheckForUpdates,
+                onVerifyFdroidRepo = onVerifyFdroidRepo,
+                onBuildRawFdroidUrl = onBuildRawFdroidUrl,
                 onBuildDefaultFdroidUrl = onBuildDefaultFdroidUrl,
                 onOpenGitHubRelease = onOpenGitHubRelease,
                 onOpenInFdroid = onOpenInFdroid

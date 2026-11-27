@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.core.AppUpdateState
+import com.example.core.FdroidRepoCheckState
 import com.example.data.JarvisSettings
 
 @Composable
@@ -60,8 +61,11 @@ fun RemoteUpdateCard(
     settings: JarvisSettings,
     currentVersionLabel: String,
     updateState: AppUpdateState,
+    fdroidRepoStatus: FdroidRepoCheckState,
     onUpdateRemoteConfig: (githubRepo: String, fdroidRepoUrl: String, autoCheck: Boolean) -> Unit,
     onCheckForUpdates: (String?) -> Unit,
+    onVerifyFdroidRepo: (String) -> Unit,
+    onBuildRawFdroidUrl: (String) -> String,
     onBuildDefaultFdroidUrl: (String) -> String,
     onOpenGitHubRelease: (String) -> Result<String>,
     onOpenInFdroid: (String) -> Result<String>,
@@ -149,8 +153,8 @@ fun RemoteUpdateCard(
             OutlinedTextField(
                 value = fdroidUrlDraft,
                 onValueChange = { fdroidUrlDraft = it },
-                label = { Text("URL do Repositório F-Droid (GitHub Pages)") },
-                placeholder = { Text("https://seu-usuario.github.io/OpenJarvis-Android/fdroid/repo") },
+                label = { Text("URL do Repositório F-Droid (/fdroid/repo)") },
+                placeholder = { Text("https://raw.githubusercontent.com/usuario/repo/gh-pages/fdroid/repo") },
                 singleLine = true,
                 trailingIcon = {
                     if (fdroidUrlDraft.isNotBlank()) {
@@ -183,7 +187,7 @@ fun RemoteUpdateCard(
             ) {
                 AssistChip(
                     onClick = {
-                        val generated = onBuildDefaultFdroidUrl(githubRepoDraft)
+                        val generated = onBuildRawFdroidUrl(githubRepoDraft)
                         if (generated.isBlank()) {
                             Toast.makeText(
                                 context,
@@ -192,7 +196,8 @@ fun RemoteUpdateCard(
                             ).show()
                         } else {
                             fdroidUrlDraft = generated
-                            Toast.makeText(context, "URL GitHub Pages preenchida", Toast.LENGTH_SHORT).show()
+                            onUpdateRemoteConfig(githubRepoDraft, generated, settings.autoCheckUpdates)
+                            onVerifyFdroidRepo(generated)
                         }
                     },
                     leadingIcon = {
@@ -202,7 +207,26 @@ fun RemoteUpdateCard(
                             modifier = Modifier.size(16.dp)
                         )
                     },
-                    label = { Text("Gerar URL GitHub Pages") },
+                    label = { Text("URL Raw (Sem Pages)") },
+                    modifier = Modifier.testTag("generate_fdroid_raw_url_chip")
+                )
+
+                AssistChip(
+                    onClick = {
+                        val generated = onBuildDefaultFdroidUrl(githubRepoDraft)
+                        if (generated.isBlank()) {
+                            Toast.makeText(
+                                context,
+                                "Informe primeiro o repositório GitHub (ex: usuario/OpenJarvis)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            fdroidUrlDraft = generated
+                            onUpdateRemoteConfig(githubRepoDraft, generated, settings.autoCheckUpdates)
+                            onVerifyFdroidRepo(generated)
+                        }
+                    },
+                    label = { Text("URL GitHub Pages") },
                     modifier = Modifier.testTag("generate_fdroid_url_chip")
                 )
             }
@@ -447,30 +471,115 @@ fun RemoteUpdateCard(
                 }
             }
 
-            // Direct F-Droid link shortcut whenever URL is already configured
+            // Live F-Droid Index Verification Status (prevents 0-byte / 404 error in F-Droid)
+            when (fdroidRepoStatus) {
+                FdroidRepoCheckState.Idle -> Unit
+
+                FdroidRepoCheckState.Checking -> {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Verificando índice F-Droid (entry.jar / index-v1.jar)…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                is FdroidRepoCheckState.Valid -> {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Repositório F-Droid online e válido (${fdroidRepoStatus.indexFile})! Pode adicionar no F-Droid.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+
+                is FdroidRepoCheckState.Invalid -> {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = fdroidRepoStatus.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Direct F-Droid test & open actions whenever URL is configured
             if (fdroidUrlDraft.isNotBlank() && updateState !is AppUpdateState.UpdateAvailable) {
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = {
-                        val result = onOpenInFdroid(fdroidUrlDraft)
-                        Toast.makeText(
-                            context,
-                            result.getOrElse { it.message ?: "Erro ao abrir repositório no F-Droid" },
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("add_repo_to_fdroid_button")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Storefront,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Adicionar / Abrir Repositório no F-Droid")
+                    OutlinedButton(
+                        onClick = {
+                            onUpdateRemoteConfig(githubRepoDraft, fdroidUrlDraft, settings.autoCheckUpdates)
+                            onVerifyFdroidRepo(fdroidUrlDraft)
+                        },
+                        enabled = fdroidRepoStatus !is FdroidRepoCheckState.Checking,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("verify_fdroid_repo_button")
+                    ) {
+                        Text("Testar F-Droid")
+                    }
+                    Button(
+                        onClick = {
+                            val result = onOpenInFdroid(fdroidUrlDraft)
+                            Toast.makeText(
+                                context,
+                                result.getOrElse { it.message ?: "Erro ao abrir repositório no F-Droid" },
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .height(48.dp)
+                            .testTag("add_repo_to_fdroid_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Storefront,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Abrir no F-Droid")
+                    }
                 }
             }
         }

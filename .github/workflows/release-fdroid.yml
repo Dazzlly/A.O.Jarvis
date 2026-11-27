@@ -2,12 +2,15 @@ name: Build APK, GitHub Release & F-Droid Repo
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Tag da versão (ex: v1.0.1)'
+        description: 'Tag da versão para criar Release (ex: v1.0.1)'
         required: false
         default: 'v1.0.0'
 
@@ -52,7 +55,7 @@ jobs:
           else
             echo "Secrets de Release não configurados; compilando APK debug..."
             if [ ! -f debug.keystore ]; then
-              keytool -genkey -v \
+              keytool -genkeypair -v \
                 -keystore debug.keystore \
                 -storepass android \
                 -alias androiddebugkey \
@@ -72,9 +75,14 @@ jobs:
             exit 1
           fi
 
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
             TAG_NAME="${{ github.event.inputs.release_tag }}"
+          else
+            VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+            VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]//g')
+            TAG_NAME="v${VERSION_NAME:-1.0}-b${VERSION_CODE:-1}"
           fi
 
           CLEAN_TAG="${TAG_NAME#v}"
@@ -84,6 +92,7 @@ jobs:
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Publicar GitHub Release com APK
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build_apk.outputs.tag_name }}
@@ -92,28 +101,37 @@ jobs:
           files: |
             ${{ steps.build_apk.outputs.apk_file }}
 
-      - name: Gerar repositório estático F-Droid
+      - name: Gerar repositório estático F-Droid válido
+        id: build_fdroid
         env:
           FDROID_KEYSTORE_BASE64: ${{ secrets.FDROID_KEYSTORE_BASE64 }}
           FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
           FDROID_KEY_PASS: ${{ secrets.FDROID_KEY_PASS }}
           APK_FILE: ${{ steps.build_apk.outputs.apk_file }}
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fdroidserver apksigner
+          sudo apt-get install -y -qq fdroidserver apksigner aapt
+
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
 
           REPO_OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO_OWNER_LOWER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
           REPO_NAME="${GITHUB_REPOSITORY##*/}"
-          REPO_URL="https://${REPO_OWNER}.github.io/${REPO_NAME}/fdroid/repo"
 
-          mkdir -p fdroid-site/fdroid
-          cd fdroid-site/fdroid
+          RAW_REPO_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/fdroid/repo"
+          PAGES_REPO_URL="https://${REPO_OWNER_LOWER}.github.io/${REPO_NAME}/fdroid/repo"
 
-          # Restaura o histórico existente do gh-pages (se já publicado) para manter versões anteriores
+          mkdir -p "$GITHUB_WORKSPACE/fdroid-site/fdroid"
+          cd "$GITHUB_WORKSPACE/fdroid-site/fdroid"
+
+          # Restaura APKs anteriores do branch gh-pages se já existir
           if git ls-remote --exit-code --heads "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages >/dev/null 2>&1; then
             git clone --depth 1 --branch gh-pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" existing-pages
             if [ -d existing-pages/fdroid/repo ]; then
-              cp -r existing-pages/fdroid/repo ./repo
+              mkdir -p repo
+              cp -n existing-pages/fdroid/repo/*.apk repo/ 2>/dev/null || true
             fi
             rm -rf existing-pages
           fi
@@ -121,35 +139,75 @@ jobs:
           mkdir -p repo metadata
           cp "$GITHUB_WORKSPACE/$APK_FILE" repo/
 
-          # Copia metadados Fastlane se existirem
-          if [ -d "$GITHUB_WORKSPACE/fastlane/metadata/android" ]; then
-            cp -r "$GITHUB_WORKSPACE/fastlane/metadata/android" metadata/
+          # Copia metadados Fastlane no caminho correto esperado pelo fdroidserver (metadata/<applicationId>/)
+          APP_ID=$(grep -E 'applicationId\s*=' "$GITHUB_WORKSPACE/app/build.gradle.kts" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -n "$APP_ID" ] && [ -d "$GITHUB_WORKSPACE/fastlane/metadata/android" ]; then
+            mkdir -p "metadata/${APP_ID}"
+            cp -r "$GITHUB_WORKSPACE/fastlane/metadata/android/"* "metadata/${APP_ID}/"
           fi
 
+          # Prepara o keystore PKCS12 do índice F-Droid (usa secret fixo ou gera um válido)
+          if [ -n "$FDROID_KEYSTORE_BASE64" ] && [ -n "$FDROID_KEYSTORE_PASS" ]; then
+            echo "$FDROID_KEYSTORE_BASE64" | base64 -d > keystore.p12
+            KS_PASS="$FDROID_KEYSTORE_PASS"
+            KEY_PASS="${FDROID_KEY_PASS:-$FDROID_KEYSTORE_PASS}"
+            KEY_ALIAS="openjarvis-fdroid"
+          else
+            KS_PASS="openjarvis_fdroid_pass"
+            KEY_PASS="openjarvis_fdroid_pass"
+            KEY_ALIAS="openjarvis-fdroid"
+            keytool -genkeypair -noprompt \
+              -keystore keystore.p12 \
+              -storetype PKCS12 \
+              -storepass "$KS_PASS" \
+              -alias "$KEY_ALIAS" \
+              -keypass "$KEY_PASS" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=OpenJarvis F-Droid Repo,O=OpenJarvis,C=BR"
+          fi
+          chmod 600 keystore.p12
+
+          # Extrai o SHA-256 fingerprint do certificado do repositório F-Droid
+          FINGERPRINT=$(keytool -list -v -keystore keystore.p12 -storepass "$KS_PASS" -alias "$KEY_ALIAS" \
+            | grep -i "SHA256:" | head -n 1 | sed 's/.*SHA256:[[:space:]]*//; s/://g' | tr '[:lower:]' '[:upper:]')
+
           cat > config.yml <<EOF
-          repo_url: "${REPO_URL}"
+          repo_url: "${RAW_REPO_URL}"
           repo_name: "OpenJarvis Repo"
           repo_description: "Repositório F-Droid oficial do projeto OpenJarvis Android (${GITHUB_REPOSITORY})."
+          mirrors:
+            - "${PAGES_REPO_URL}"
+          keystore: "keystore.p12"
+          keystorepass: "${KS_PASS}"
+          repo_keyalias: "${KEY_ALIAS}"
+          keypass: "${KEY_PASS}"
           repo_maxage: 0
           archive_older: 0
           EOF
+          chmod 600 config.yml
 
-          if [ -n "$FDROID_KEYSTORE_BASE64" ] && [ -n "$FDROID_KEYSTORE_PASS" ]; then
-            echo "$FDROID_KEYSTORE_BASE64" | base64 -d > keystore.p12
-            cat >> config.yml <<EOF
-          keystore: keystore.p12
-          keystorepass: "${FDROID_KEYSTORE_PASS}"
-          repo_keyalias: "openjarvis-fdroid"
-          keypass: "${FDROID_KEY_PASS:-$FDROID_KEYSTORE_PASS}"
-          EOF
-          else
-            fdroid init --no-prompt
+          fdroid update --create-metadata --use-date-from-apk
+
+          # Validação estrita: impede publicação de índice vazio (causa do erro 0 bytes no F-Droid)
+          if [ ! -s repo/index-v1.jar ] && [ ! -s repo/entry.jar ]; then
+            echo "Erro fatal: nenhum índice F-Droid (index-v1.jar ou entry.jar) foi gerado!"
+            ls -la repo/
+            exit 1
           fi
 
-          fdroid update --create-metadata --pretty --use-date-from-apk
-          rm -f keystore.p12 config.yml
+          echo "Arquivos gerados em fdroid/repo:"
+          ls -lh repo/
 
-          # Página índice simples para facilitar a adição no F-Droid
+          # Remove arquivos secretos antes do deploy para gh-pages
+          rm -f keystore.p12 config.yml
+          touch "$GITHUB_WORKSPACE/fdroid-site/.nojekyll"
+
+          # Página inicial para facilitar abrir direto no F-Droid com fingerprint
+          FDROID_RAW_LINK="fdroidrepos://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/fdroid/repo?fingerprint=${FINGERPRINT}"
+          FDROID_PAGES_LINK="fdroidrepos://${REPO_OWNER_LOWER}.github.io/${REPO_NAME}/fdroid/repo?fingerprint=${FINGERPRINT}"
+
           cat > "$GITHUB_WORKSPACE/fdroid-site/index.html" <<EOF
           <!DOCTYPE html>
           <html lang="pt-BR">
@@ -158,24 +216,37 @@ jobs:
             <meta name="viewport" content="width=device-width, initial-scale=1" />
             <title>OpenJarvis — Repositório F-Droid</title>
             <style>
-              body { font-family: system-ui, sans-serif; background: #0B1117; color: #E6EDF3; padding: 32px; max-width: 680px; margin: auto; }
-              a.btn { display: inline-block; background: #26C6DA; color: #052026; font-weight: 700; padding: 12px 20px; border-radius: 10px; text-decoration: none; margin-top: 12px; }
-              code { background: #161F29; padding: 4px 8px; border-radius: 6px; word-break: break-all; }
+              body { font-family: system-ui, sans-serif; background: #0B1117; color: #E6EDF3; padding: 32px; max-width: 720px; margin: auto; }
+              a.btn { display: inline-block; background: #26C6DA; color: #052026; font-weight: 700; padding: 12px 20px; border-radius: 10px; text-decoration: none; margin: 8px 8px 0 0; }
+              code { display: block; background: #161F29; padding: 10px 12px; border-radius: 8px; word-break: break-all; margin: 8px 0; }
             </style>
           </head>
           <body>
             <h1>OpenJarvis — Repositório F-Droid</h1>
-            <p>Adicione este endereço no aplicativo F-Droid para receber atualizações automáticas do OpenJarvis:</p>
-            <p><code>${REPO_URL}</code></p>
-            <a class="btn" href="fdroidrepos://${REPO_OWNER}.github.io/${REPO_NAME}/fdroid/repo">Abrir no F-Droid</a>
+            <p>Adicione um dos endereços abaixo no aplicativo F-Droid:</p>
+            <h3>Opção 1 — GitHub Raw (funciona imediatamente sem GitHub Pages)</h3>
+            <code>${RAW_REPO_URL}</code>
+            <a class="btn" href="${FDROID_RAW_LINK}">Abrir no F-Droid (Raw)</a>
+            <h3>Opção 2 — GitHub Pages</h3>
+            <code>${PAGES_REPO_URL}</code>
+            <a class="btn" href="${FDROID_PAGES_LINK}">Abrir no F-Droid (Pages)</a>
+            <h3>Fingerprint SHA-256</h3>
+            <code>${FINGERPRINT}</code>
           </body>
           </html>
           EOF
 
-      - name: Publicar repositório F-Droid no GitHub Pages
+          {
+            echo "## Repositório F-Droid Publicado"
+            echo "- **URL Direta (Raw GitHub — funciona sem precisar ativar Pages):** \`${RAW_REPO_URL}\`"
+            echo "- **URL GitHub Pages:** \`${PAGES_REPO_URL}\`"
+            echo "- **Fingerprint SHA-256:** \`${FINGERPRINT}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar repositório F-Droid no branch gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./fdroid-site
           publish_branch: gh-pages
-          keep_files: true
+          force_orphan: true
