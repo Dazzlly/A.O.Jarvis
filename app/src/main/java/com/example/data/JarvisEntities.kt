@@ -71,3 +71,19 @@ data class TraceEntity(
     val errorMessage: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "voice_command_logs")
+data class VoiceCommandLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val transcript: String,
+    val responsePreview: String,
+    val source: String, // "VOICE_STT", "VOICE_BG", "GEMINI_LIVE"
+    val engineUsed: String, // "GEMINI", "OLLAMA", "OFFLINE", "GEMINI_LIVE"
+    val modelName: String = "",
+    val confidence: Float = -1f,
+    val latencyMs: Long = 0L,
+    val success: Boolean = true,
+    val errorMessage: String? = null,
+    val appVersion: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)

@@ -122,6 +122,7 @@ fun OpenJarvisApp(
     val commands by viewModel.voiceCommands.collectAsStateWithLifecycle()
     val offlineVoiceCommands by viewModel.offlineVoiceCommands.collectAsStateWithLifecycle()
     val traces by viewModel.traces.collectAsStateWithLifecycle()
+    val voiceCommandLogs by viewModel.voiceCommandLogs.collectAsStateWithLifecycle()
     val streamingState by viewModel.streamingState.collectAsStateWithLifecycle()
     val assistantState by viewModel.assistantState.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
@@ -792,7 +793,15 @@ fun OpenJarvisApp(
                                 )
 
                                 JarvisTab.TELEMETRY -> TelemetryScreen(
+                                    voiceLogs = voiceCommandLogs,
                                     traces = traces,
+                                    onDeleteVoiceLog = { viewModel.deleteVoiceCommandLog(it) },
+                                    onClearVoiceLogs = { viewModel.clearVoiceCommandLogs() },
+                                    onReplayVoiceCommand = { transcript ->
+                                        viewModel.sendPrompt(transcript, sourceTag = "VOICE_STT")
+                                        currentTab = JarvisTab.CONSOLE
+                                    },
+                                    onSpeakLogResponse = { reply -> viewModel.speakText(reply) },
                                     onClearTraces = { viewModel.clearTraces() }
                                 )
                             }

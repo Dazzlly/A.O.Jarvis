@@ -47,6 +47,7 @@ import com.example.data.OfflineVoiceCommandEntity
 import com.example.data.RoutingMode
 import com.example.data.TraceEntity
 import com.example.data.VoiceCommandEntity
+import com.example.data.VoiceCommandLogEntity
 import com.example.engine.EngineType
 import com.example.engine.InferenceStreamEvent
 import com.example.engine.LiveVoiceState
@@ -90,6 +91,7 @@ class OpenJarvisViewModel(
     private val coordinator = JarvisRuntimeCoordinator.getInstance(application.applicationContext)
     private val database = coordinator.database
     private val offlineVoiceCommandRepository = coordinator.offlineVoiceCommandRepository
+    private val voiceCommandHistoryRepository = coordinator.voiceCommandHistoryRepository
     private val settingsDataStore = coordinator.settingsDataStore
     private val orchestrator = coordinator.orchestrator
     private val networkEngineManager = coordinator.networkEngineManager
@@ -206,6 +208,11 @@ class OpenJarvisViewModel(
                 cloudRepository.upsertUserProfile(user)
             }
         }
+        viewModelScope.launch {
+            speechController.waveformSamples.collect { samples ->
+                coordinator.updateVoiceState { it.copy(waveformSamples = samples) }
+            }
+        }
     }
 
     val settings: StateFlow<JarvisSettings> = settingsDataStore.settingsFlow.stateIn(
@@ -253,6 +260,13 @@ class OpenJarvisViewModel(
         initialValue = emptyList()
     )
 
+    val voiceCommandLogs: StateFlow<List<VoiceCommandLogEntity>> =
+        voiceCommandHistoryRepository.observeRecentLogs(limit = 200).stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     val assistantState: StateFlow<AssistantState> = conversationStateManager.assistantState
     val networkState: StateFlow<NetworkEngineState> = networkEngineManager.state
     val lanServerState: StateFlow<LanServerState> = coordinator.lanServerState
@@ -298,7 +312,8 @@ class OpenJarvisViewModel(
     fun sendPrompt(
         prompt: String,
         sourceTag: String = "TEXT",
-        speakReply: Boolean? = null
+        speakReply: Boolean? = null,
+        sttConfidence: Float = -1f
     ) {
         val clean = prompt.trim()
         if (clean.isEmpty()) return
@@ -333,7 +348,8 @@ class OpenJarvisViewModel(
             try {
                 conversationStateManager.executeCommand(
                     prompt = clean,
-                    source = commandSource
+                    source = commandSource,
+                    sttConfidence = sttConfidence
                 ).collect { event ->
                     when (event) {
                         is InferenceStreamEvent.Chunk -> {
@@ -457,6 +473,7 @@ class OpenJarvisViewModel(
             )
         }
 
+        var capturedConfidence = -1f
         speechController.startListening(
             preferOffline = currentSettings.preferOfflineStt,
             onReady = {
@@ -467,12 +484,26 @@ class OpenJarvisViewModel(
             },
             onFinal = { transcript ->
                 coordinator.updateVoiceState {
-                    it.copy(isListening = false, rmsDb = 0f, partialTranscript = "", statusText = "Processando comando…")
+                    it.copy(
+                        isListening = false,
+                        rmsDb = 0f,
+                        partialTranscript = "",
+                        lastSttConfidence = capturedConfidence,
+                        statusText = "Processando comando…"
+                    )
                 }
-                sendPrompt(transcript, sourceTag = CommandSource.VOICE_STT.tag, speakReply = currentSettings.autoSpeakResponses)
+                sendPrompt(
+                    prompt = transcript,
+                    sourceTag = CommandSource.VOICE_STT.tag,
+                    speakReply = currentSettings.autoSpeakResponses,
+                    sttConfidence = capturedConfidence
+                )
             },
             onRms = { rms ->
                 coordinator.updateVoiceState { it.copy(rmsDb = rms) }
+            },
+            onConfidence = { confidence ->
+                capturedConfidence = confidence
             },
             onError = { code, msg ->
                 val displayError = if (code == SpeechRecognizer.ERROR_NO_MATCH || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
@@ -600,6 +631,14 @@ class OpenJarvisViewModel(
     }
 
     fun clearTraces() = viewModelScope.launch { database.traceDao().clearAll() }
+
+    fun deleteVoiceCommandLog(id: Long) = viewModelScope.launch {
+        voiceCommandHistoryRepository.deleteLog(id)
+    }
+
+    fun clearVoiceCommandLogs() = viewModelScope.launch {
+        voiceCommandHistoryRepository.clearAll()
+    }
 
     fun addVoiceCommand(trigger: String, actionType: String, payload: String) = viewModelScope.launch {
         val cleanTrigger = trigger.trim()

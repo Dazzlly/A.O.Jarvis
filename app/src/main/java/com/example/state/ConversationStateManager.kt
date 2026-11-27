@@ -6,6 +6,7 @@ import com.example.data.ConversationSessionEntity
 import com.example.data.DEFAULT_SESSION_ID
 import com.example.data.JarvisDatabase
 import com.example.data.RoutingMode
+import com.example.data.VoiceCommandHistoryRepository
 import com.example.engine.EngineType
 import com.example.engine.InferenceStreamEvent
 import com.example.engine.OpenJarvisOrchestrator
@@ -73,7 +74,8 @@ data class AssistantState(
  */
 class ConversationStateManager(
     private val database: JarvisDatabase,
-    private val orchestrator: OpenJarvisOrchestrator
+    private val orchestrator: OpenJarvisOrchestrator,
+    private val voiceCommandHistoryRepository: VoiceCommandHistoryRepository
 ) {
     private val executionMutex = Mutex()
 
@@ -188,7 +190,8 @@ class ConversationStateManager(
         source: CommandSource,
         routingOverride: RoutingMode? = null,
         sessionIdOverride: String? = null,
-        attachedBitmap: Bitmap? = null
+        attachedBitmap: Bitmap? = null,
+        sttConfidence: Float = -1f
     ): Flow<InferenceStreamEvent> = flow {
         val cleanPrompt = prompt.trim()
         if (cleanPrompt.isEmpty()) return@flow
@@ -261,6 +264,18 @@ class ConversationStateManager(
                     is InferenceStreamEvent.Completed -> {
                         val updatedCount = database.chatMessageDao().countMessagesInSession(targetSessionId)
                         sessionDao.touchSession(targetSessionId, System.currentTimeMillis())
+                        if (source == CommandSource.VOICE_STT || source == CommandSource.VOICE_BG) {
+                            voiceCommandHistoryRepository.recordInteraction(
+                                transcript = cleanPrompt,
+                                responsePreview = event.fullText,
+                                source = source.tag,
+                                engineUsed = event.engineType.name,
+                                modelName = event.modelName,
+                                confidence = sttConfidence,
+                                latencyMs = event.latencyMs,
+                                success = true
+                            )
+                        }
                         _assistantState.update {
                             it.copy(
                                 phase = AssistantPhase.Idle,
@@ -272,6 +287,19 @@ class ConversationStateManager(
                     }
 
                     is InferenceStreamEvent.Error -> {
+                        if (source == CommandSource.VOICE_STT || source == CommandSource.VOICE_BG) {
+                            voiceCommandHistoryRepository.recordInteraction(
+                                transcript = cleanPrompt,
+                                responsePreview = event.message,
+                                source = source.tag,
+                                engineUsed = event.engineType.name,
+                                modelName = event.modelName,
+                                confidence = sttConfidence,
+                                latencyMs = event.latencyMs,
+                                success = false,
+                                errorMessage = event.message
+                            )
+                        }
                         _assistantState.update {
                             it.copy(
                                 phase = AssistantPhase.Error(event.message),

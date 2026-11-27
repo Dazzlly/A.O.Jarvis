@@ -57,8 +57,32 @@ class NativeSpeechController(private val context: Context) {
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    private val _waveformSamples = MutableStateFlow(List(WAVEFORM_BAR_COUNT) { 0.08f })
+    val waveformSamples: StateFlow<List<Float>> = _waveformSamples.asStateFlow()
+
+    private val _lastConfidence = MutableStateFlow(-1f)
+    val lastConfidence: StateFlow<Float> = _lastConfidence.asStateFlow()
+
+    val isSpeechRecognitionAvailable: Boolean
+        get() = SpeechRecognizer.isRecognitionAvailable(appContext)
+
     init {
         initTtsEngine()
+    }
+
+    private fun pushRmsToWaveform(rmsdB: Float) {
+        val normalized = ((rmsdB + 2f) / 12f).coerceIn(0.06f, 1f)
+        val current = _waveformSamples.value
+        val updated = if (current.size >= WAVEFORM_BAR_COUNT) {
+            current.drop(1) + normalized
+        } else {
+            current + normalized
+        }
+        _waveformSamples.value = updated
+    }
+
+    fun resetWaveform() {
+        _waveformSamples.value = List(WAVEFORM_BAR_COUNT) { 0.08f }
     }
 
     fun reinitializeTts() {
@@ -171,6 +195,7 @@ class NativeSpeechController(private val context: Context) {
         onPartial: (String) -> Unit = {},
         onFinal: (String) -> Unit,
         onRms: (Float) -> Unit = {},
+        onConfidence: (Float) -> Unit = {},
         onError: (Int, String) -> Unit = { _, _ -> }
     ) {
         mainHandler.post {
@@ -184,6 +209,8 @@ class NativeSpeechController(private val context: Context) {
 
             stopSpeakingInternal()
             destroyRecognizerInternal()
+            resetWaveform()
+            _lastConfidence.value = -1f
 
             val recognizer = SpeechRecognizer.createSpeechRecognizer(appContext)
             speechRecognizer = recognizer
@@ -196,28 +223,39 @@ class NativeSpeechController(private val context: Context) {
                 override fun onBeginningOfSpeech() = Unit
 
                 override fun onRmsChanged(rmsdB: Float) {
+                    pushRmsToWaveform(rmsdB)
                     onRms(rmsdB)
                 }
 
                 override fun onBufferReceived(buffer: ByteArray?) = Unit
 
                 override fun onEndOfSpeech() {
+                    resetWaveform()
                     onRms(0f)
                 }
 
                 override fun onError(error: Int) {
+                    resetWaveform()
                     onRms(0f)
                     onError(error, mapSpeechError(error))
                 }
 
                 override fun onResults(results: Bundle?) {
+                    resetWaveform()
                     onRms(0f)
                     val transcript = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
                         ?.trim()
                         .orEmpty()
+                    val confidence = results
+                        ?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+                        ?.firstOrNull()
+                        ?.takeIf { it in 0f..1f }
+                        ?: -1f
+                    _lastConfidence.value = confidence
                     if (transcript.isNotBlank()) {
+                        onConfidence(confidence)
                         onFinal(transcript)
                     } else {
                         onError(SpeechRecognizer.ERROR_NO_MATCH, "Nenhuma fala reconhecida.")
@@ -266,6 +304,7 @@ class NativeSpeechController(private val context: Context) {
 
     fun stopListening() {
         mainHandler.post {
+            resetWaveform()
             runCatching { speechRecognizer?.stopListening() }
             runCatching { speechRecognizer?.cancel() }
         }
@@ -430,5 +469,9 @@ class NativeSpeechController(private val context: Context) {
         SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
             "Pacote de idioma offline não instalado."
         else -> "Erro STT ($errorCode)."
+    }
+
+    companion object {
+        const val WAVEFORM_BAR_COUNT = 32
     }
 }

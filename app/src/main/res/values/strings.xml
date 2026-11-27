@@ -23,6 +23,7 @@
     <string name="bg_channel_name">A.O.Jarvis Voz Contínua</string>
     <string name="bg_channel_desc">Mantém o reconhecimento de fala nativo ativo em segundo plano para interações contínuas, Ollama local e comandos offline.</string>
     <string name="bg_notif_title">A.O.Jarvis em segundo plano</string>
+    <string name="bg_action_listen_now">Falar agora</string>
     <string name="bg_action_pause">Pausar</string>
     <string name="bg_action_resume">Retomar</string>
     <string name="bg_action_stop">Encerrar</string>
@@ -45,7 +46,13 @@
     <string name="engines_voice_title">Voz Nativa &amp; Segundo Plano</string>
     <string name="engines_test_connection">Testar &amp; Listar Modelos</string>
 
-    <string name="telemetry_title">Telemetria &amp; Traces</string>
+    <string name="telemetry_title">Histórico &amp; Telemetria</string>
+    <string name="telemetry_tab_voice_history">Histórico de Voz</string>
+    <string name="telemetry_tab_traces">Traces</string>
+    <string name="voice_history_search_hint">Buscar comando ou resposta…</string>
+    <string name="cd_delete_voice_log">Remover registro do histórico de voz</string>
+    <string name="cd_replay_voice_log">Executar comando de voz novamente</string>
+    <string name="cd_speak_voice_log">Ouvir resposta salva em voz alta</string>
 
     <string name="session_new">Nova conversa</string>
     <string name="cd_new_session">Iniciar nova sessão de conversa</string>

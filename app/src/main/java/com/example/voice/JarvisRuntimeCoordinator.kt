@@ -17,6 +17,7 @@ import com.example.core.SelfEvolutionManager
 import com.example.data.JarvisDatabase
 import com.example.data.OfflineVoiceCommandRepository
 import com.example.data.SettingsDataStore
+import com.example.data.VoiceCommandHistoryRepository
 import com.example.engine.GeminiInferenceEngine
 import com.example.engine.GeminiLiveManager
 import com.example.engine.NetworkEngineManager
@@ -38,6 +39,9 @@ data class VoiceRuntimeState(
     val isProcessingVoice: Boolean = false,
     val partialTranscript: String = "",
     val rmsDb: Float = 0f,
+    val waveformSamples: List<Float> = List(NativeSpeechController.WAVEFORM_BAR_COUNT) { 0.08f },
+    val lastSttConfidence: Float = -1f,
+    val backgroundCommandsHandled: Int = 0,
     val statusText: String = "Pronto para escutar",
     val awaitingFollowUpCommand: Boolean = false,
     val errorMessage: String? = null
@@ -54,6 +58,8 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
     val database: JarvisDatabase = JarvisDatabase.getInstance(appContext)
     val offlineVoiceCommandRepository: OfflineVoiceCommandRepository =
         OfflineVoiceCommandRepository(database.offlineVoiceCommandDao())
+    val voiceCommandHistoryRepository: VoiceCommandHistoryRepository =
+        VoiceCommandHistoryRepository(database.voiceCommandLogDao())
     val settingsDataStore: SettingsDataStore = SettingsDataStore(appContext)
     val speechController: NativeSpeechController = NativeSpeechController(appContext)
     val integrationManager: AppIntegrationManager = AppIntegrationManager(appContext)
@@ -116,7 +122,8 @@ class JarvisRuntimeCoordinator private constructor(appContext: Context) {
     )
     val conversationStateManager: ConversationStateManager = ConversationStateManager(
         database = database,
-        orchestrator = orchestrator
+        orchestrator = orchestrator,
+        voiceCommandHistoryRepository = voiceCommandHistoryRepository
     )
     val geminiLiveManager: GeminiLiveManager = GeminiLiveManager()
 

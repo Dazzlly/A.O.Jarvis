@@ -123,3 +123,25 @@ interface TraceDao {
     @Query("DELETE FROM traces")
     suspend fun clearAll()
 }
+
+@Dao
+interface VoiceCommandLogDao {
+    @Query("SELECT * FROM voice_command_logs ORDER BY timestamp DESC LIMIT :limit")
+    fun observeRecentLogs(limit: Int = 200): Flow<List<VoiceCommandLogEntity>>
+
+    @Query(
+        "SELECT * FROM voice_command_logs " +
+            "WHERE transcript LIKE '%' || :query || '%' OR responsePreview LIKE '%' || :query || '%' " +
+            "ORDER BY timestamp DESC LIMIT 200"
+    )
+    fun searchLogs(query: String): Flow<List<VoiceCommandLogEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLog(log: VoiceCommandLogEntity): Long
+
+    @Query("DELETE FROM voice_command_logs WHERE id = :id")
+    suspend fun deleteLogById(id: Long)
+
+    @Query("DELETE FROM voice_command_logs")
+    suspend fun clearAll()
+}

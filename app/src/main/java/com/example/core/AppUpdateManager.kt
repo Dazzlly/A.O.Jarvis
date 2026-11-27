@@ -393,7 +393,11 @@ class AppUpdateManager(context: Context) {
         return "https://$owner.github.io/$repo/fdroid/repo"
     }
 
-    fun isNewerVersion(remoteTag: String, localVersion: String): Boolean {
+    fun isNewerVersion(
+        remoteTag: String,
+        localVersion: String,
+        localVersionCode: Int = currentVersionCode
+    ): Boolean {
         val remoteParts = parseVersionParts(remoteTag)
         val localParts = parseVersionParts(localVersion)
         val maxLen = maxOf(remoteParts.size, localParts.size)
@@ -402,6 +406,10 @@ class AppUpdateManager(context: Context) {
             val l = localParts.getOrElse(i) { 0 }
             if (r > l) return true
             if (r < l) return false
+        }
+        val remoteBuild = extractBuildNumber(remoteTag)
+        if (remoteBuild != null) {
+            return remoteBuild > localVersionCode
         }
         return false
     }
@@ -413,5 +421,10 @@ class AppUpdateManager(context: Context) {
             .substringBefore("-")
             .substringBefore("+")
         return cleaned.split(".").mapNotNull { it.trim().toIntOrNull() }
+    }
+
+    private fun extractBuildNumber(tag: String): Int? {
+        val match = Regex("(?i)(?:[-+](?:b|vc|build))(\\d+)").find(tag.trim())
+        return match?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
 }

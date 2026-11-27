@@ -109,6 +109,7 @@ import com.example.ui.StreamingUiState
 import com.example.ui.components.EngineBadge
 import com.example.ui.components.TronPulseHaloBox
 import com.example.ui.components.VoiceOrbVisualizer
+import com.example.ui.components.VoiceWaveformVisualizer
 import com.example.ui.components.rememberTronPulseState
 import com.example.vision.ScreenShareState
 import com.example.voice.LanServerState
@@ -885,23 +886,22 @@ private fun LiveNativeVoiceStrip(
                     }
                 }
             }
-            if (voiceState.isListening || voiceState.isProcessingVoice) {
-                Spacer(modifier = Modifier.height(6.dp))
-                val level = ((voiceState.rmsDb + 2f) / 12f).coerceIn(0.08f, 1f)
-                if (voiceState.isProcessingVoice) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(CircleShape)
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        progress = { level },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(CircleShape)
+            if (voiceState.isListening || voiceState.isProcessingVoice || (voiceState.isBackgroundRunning && !voiceState.isBackgroundPaused)) {
+                Spacer(modifier = Modifier.height(8.dp))
+                VoiceWaveformVisualizer(
+                    waveformSamples = voiceState.waveformSamples,
+                    rmsDb = voiceState.rmsDb,
+                    isListening = voiceState.isListening,
+                    isProcessing = voiceState.isProcessingVoice,
+                    height = 48.dp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (voiceState.backgroundCommandsHandled > 0 && voiceState.isBackgroundRunning) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Conexão persistente ativa · ${voiceState.backgroundCommandsHandled} comando(s) em segundo plano",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1373,7 +1373,23 @@ private fun GeminiLiveVoicePanel(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        if (isActive || isConnecting) {
+            Spacer(modifier = Modifier.height(14.dp))
+            VoiceWaveformVisualizer(
+                waveformSamples = List(32) { idx ->
+                    if (isActive) (0.35f + ((idx % 5) * 0.12f)) else 0.18f
+                },
+                rmsDb = if (isActive) 7.5f else 2f,
+                isListening = isActive,
+                isProcessing = isConnecting,
+                height = 44.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
 
         Text(
             text = when (liveState) {

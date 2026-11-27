@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -39,6 +40,7 @@ import kotlin.coroutines.resume
 
 private const val TAG = "JarvisBackgroundService"
 private const val MAX_FOLLOW_UP_SILENCE_RETRIES = 2
+private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L // 30-minute renewable safety cap
 
 /**
  * Foreground Service do OpenJarvis que mantém:
@@ -55,8 +57,10 @@ class JarvisBackgroundService : Service() {
     private var settingsObserverJob: Job? = null
     private var networkObserverJob: Job? = null
     private var lanStateMirrorJob: Job? = null
+    private var waveformMirrorJob: Job? = null
     private var restartJob: Job? = null
     private var dispatchJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     @Volatile
     private var isPaused = false
@@ -66,6 +70,7 @@ class JarvisBackgroundService : Service() {
 
     private var awaitingDirectCommand = false
     private var followUpSilenceRetries = 0
+    private var lastSttConfidence = -1f
     private var isForegroundStarted = false
 
     override fun onCreate() {
@@ -94,6 +99,18 @@ class JarvisBackgroundService : Service() {
 
             ACTION_RESUME -> {
                 resumeVoiceListening()
+                return START_STICKY
+            }
+
+            ACTION_LISTEN_NOW -> {
+                isPaused = false
+                awaitingDirectCommand = true
+                followUpSilenceRetries = 0
+                if (voiceEnabledInService) {
+                    acquireWakeLock()
+                    speechController.stopSpeaking()
+                    scheduleNextListen(delayMs = 150L)
+                }
                 return START_STICKY
             }
 
@@ -141,6 +158,38 @@ class JarvisBackgroundService : Service() {
                     coordinator.updateVoiceState { it.copy(statusText = label) }
                     updateNotification(label)
                 }
+            }
+        }
+        waveformMirrorJob?.cancel()
+        waveformMirrorJob = serviceScope.launch {
+            speechController.waveformSamples.collect { samples ->
+                coordinator.updateVoiceState { it.copy(waveformSamples = samples) }
+            }
+        }
+    }
+
+    private fun acquireWakeLock() {
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            val lock = wakeLock ?: pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "A.O.Jarvis:PersistentVoiceWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                wakeLock = this
+            }
+            if (!lock.isHeld) {
+                lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
+        }.onFailure {
+            Log.w(TAG, "Unable to acquire background wake lock: ${it.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        runCatching {
+            wakeLock?.let { lock ->
+                if (lock.isHeld) lock.release()
             }
         }
     }
@@ -211,17 +260,24 @@ class JarvisBackgroundService : Service() {
             } else {
                 coordinator.conversationStateManager.updatePhase(AssistantPhase.Idle, followUpWindowActive = false)
             }
+            if (!settings.lanTriggerEnabled) {
+                releaseWakeLock()
+            } else {
+                acquireWakeLock()
+            }
             updateNotification(status)
         } else if (!isPaused && !coordinator.voiceState.value.isListening &&
             !coordinator.voiceState.value.isProcessingVoice &&
             !coordinator.voiceState.value.isSpeaking
         ) {
+            acquireWakeLock()
             scheduleNextListen(delayMs = 250L)
         }
     }
 
     private fun pauseVoiceListening() {
         isPaused = true
+        releaseWakeLock()
         restartJob?.cancel()
         speechController.stopListening()
         speechController.stopSpeaking()
@@ -259,6 +315,7 @@ class JarvisBackgroundService : Service() {
         }
         updateNotification("Retomando escuta contínua…")
         if (voiceEnabledInService) {
+            acquireWakeLock()
             scheduleNextListen(delayMs = 250L)
         }
     }
@@ -327,16 +384,27 @@ class JarvisBackgroundService : Service() {
                 coordinator.updateVoiceState {
                     it.copy(partialTranscript = partial)
                 }
+                if (partial.isNotBlank()) {
+                    updateNotification("Ouvindo: \"$partial\"")
+                }
             },
             onFinal = { transcript ->
                 followUpSilenceRetries = 0
                 coordinator.updateVoiceState {
-                    it.copy(isListening = false, rmsDb = 0f, partialTranscript = transcript)
+                    it.copy(
+                        isListening = false,
+                        rmsDb = 0f,
+                        partialTranscript = transcript,
+                        lastSttConfidence = lastSttConfidence
+                    )
                 }
-                handleSpokenTranscript(transcript)
+                handleSpokenTranscript(transcript, lastSttConfidence)
             },
             onRms = { rms ->
                 coordinator.updateVoiceState { it.copy(rmsDb = rms) }
+            },
+            onConfidence = { confidence ->
+                lastSttConfidence = confidence
             },
             onError = { errorCode, errorMessage ->
                 coordinator.updateVoiceState {
@@ -377,7 +445,7 @@ class JarvisBackgroundService : Service() {
         )
     }
 
-    private fun handleSpokenTranscript(rawTranscript: String) {
+    private fun handleSpokenTranscript(rawTranscript: String, sttConfidence: Float = -1f) {
         dispatchJob?.cancel()
         dispatchJob = serviceScope.launch {
             try {
@@ -473,7 +541,8 @@ class JarvisBackgroundService : Service() {
                 var responseToSpeak: String? = null
                 coordinator.conversationStateManager.executeCommand(
                     prompt = promptToExecute,
-                    source = CommandSource.VOICE_BG
+                    source = CommandSource.VOICE_BG,
+                    sttConfidence = sttConfidence
                 ).collect { event ->
                     when (event) {
                         is InferenceStreamEvent.Chunk -> {
@@ -492,7 +561,12 @@ class JarvisBackgroundService : Service() {
                     }
                 }
 
-                coordinator.updateVoiceState { it.copy(isProcessingVoice = false) }
+                coordinator.updateVoiceState {
+                    it.copy(
+                        isProcessingVoice = false,
+                        backgroundCommandsHandled = it.backgroundCommandsHandled + 1
+                    )
+                }
 
                 // Keep continuous follow-up window open if enabled in settings
                 awaitingDirectCommand = settings.continuousConversationMode
@@ -719,9 +793,11 @@ class JarvisBackgroundService : Service() {
 
     private fun stopSelfAndCleanup() {
         isPaused = true
+        releaseWakeLock()
         settingsObserverJob?.cancel()
         networkObserverJob?.cancel()
         lanStateMirrorJob?.cancel()
+        waveformMirrorJob?.cancel()
         restartJob?.cancel()
         dispatchJob?.cancel()
         lanServer.stop()
@@ -738,6 +814,7 @@ class JarvisBackgroundService : Service() {
                 isProcessingVoice = false,
                 partialTranscript = "",
                 rmsDb = 0f,
+                waveformSamples = List(NativeSpeechController.WAVEFORM_BAR_COUNT) { 0.08f },
                 awaitingFollowUpCommand = false,
                 statusText = "Pronto para escutar"
             )
@@ -802,6 +879,16 @@ class JarvisBackgroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val listenNowIntent = Intent(this, JarvisBackgroundService::class.java).apply {
+            action = ACTION_LISTEN_NOW
+        }
+        val listenNowPending = PendingIntent.getService(
+            this,
+            3,
+            listenNowIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val toggleLabel = if (isPaused) getString(R.string.bg_action_resume) else getString(R.string.bg_action_pause)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -811,15 +898,18 @@ class JarvisBackgroundService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(contentPendingIntent)
+            .addAction(0, getString(R.string.bg_action_listen_now), listenNowPending)
             .addAction(0, toggleLabel, togglePending)
             .addAction(0, getString(R.string.bg_action_stop), stopPending)
             .build()
     }
 
     override fun onDestroy() {
+        releaseWakeLock()
         settingsObserverJob?.cancel()
         networkObserverJob?.cancel()
         lanStateMirrorJob?.cancel()
+        waveformMirrorJob?.cancel()
         restartJob?.cancel()
         dispatchJob?.cancel()
         lanServer.destroy()
@@ -847,6 +937,7 @@ class JarvisBackgroundService : Service() {
         const val ACTION_START = "com.example.openjarvis.ACTION_START"
         const val ACTION_PAUSE = "com.example.openjarvis.ACTION_PAUSE"
         const val ACTION_RESUME = "com.example.openjarvis.ACTION_RESUME"
+        const val ACTION_LISTEN_NOW = "com.example.openjarvis.ACTION_LISTEN_NOW"
         const val ACTION_STOP = "com.example.openjarvis.ACTION_STOP"
     }
 }
