@@ -137,10 +137,10 @@ jobs:
             rm -rf existing-pages
           fi
 
-          mkdir -p repo/icons metadata
+          mkdir -p repo metadata
           cp "$GITHUB_WORKSPACE/$APK_FILE" repo/
           if [ -f "$GITHUB_WORKSPACE/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" ]; then
-            cp "$GITHUB_WORKSPACE/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" repo/icons/icon.png
+            cp "$GITHUB_WORKSPACE/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" repo-icon.png
           fi
 
           # Copia metadados Fastlane no caminho correto esperado pelo fdroidserver (metadata/<applicationId>/)
@@ -181,7 +181,7 @@ jobs:
           repo_url: "${RAW_REPO_URL}"
           repo_name: "OpenJarvis Repo"
           repo_description: "Repositório F-Droid oficial do projeto OpenJarvis Android (${GITHUB_REPOSITORY})."
-          repo_icon: "repo/icons/icon.png"
+          repo_icon: "repo-icon.png"
           mirrors:
             - "${PAGES_MIRROR_URL}"
           keystore: "keystore.p12"
@@ -205,8 +205,8 @@ jobs:
           echo "Arquivos gerados em fdroid/repo:"
           ls -lh repo/
 
-          # Remove arquivos secretos antes do deploy para gh-pages
-          rm -f keystore.p12 config.yml
+          # Remove arquivos secretos e temporários antes do deploy para gh-pages
+          rm -f keystore.p12 config.yml repo-icon.png
           touch "$GITHUB_WORKSPACE/fdroid-site/.nojekyll"
 
           # Página inicial para facilitar abrir direto no F-Droid com fingerprint
