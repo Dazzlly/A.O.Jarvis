@@ -1,0 +1,12 @@
+Categories:
+  - System
+  - Internet
+License: Apache-2.0
+AuthorName: A.O.Jarvis
+Name: A.O.Jarvis
+SourceCode: https://github.com/Dazzlly/A.O.Jarvis
+IssueTracker: https://github.com/Dazzlly/A.O.Jarvis/issues
+AutoUpdateMode: None
+UpdateCheckMode: None
+CurrentVersion: "1.3.3"
+CurrentVersionCode: 7

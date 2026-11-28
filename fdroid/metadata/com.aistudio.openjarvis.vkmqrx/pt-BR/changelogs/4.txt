@@ -1,0 +1,4 @@
+- v1.3.0 (build 4):
+- Nova detecção leve da palavra-chave "Hey Jarvis" usando a API AudioRecord do Android (PCM 16 kHz com VAD adaptativo de piso de ruído, ZCR e cadência vocal) para acionar a escuta do assistente sem precisar tocar no botão do microfone.
+- Barra interativa de standby "Hey Jarvis" no Console com medidor de energia em tempo real e controle de sensibilidade do AudioRecord na aba Motores.
+- Integração da detecção leve AudioRecord também no Foreground Service em segundo plano para reduzir consumo de bateria.

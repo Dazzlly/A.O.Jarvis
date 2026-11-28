@@ -1,0 +1,1 @@
+Assistente de voz Android com Gemini, Ollama local na rede Wi-Fi e modo offline.

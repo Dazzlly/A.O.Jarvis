@@ -1,0 +1,4 @@
+- v1.3.2 (build 6):
+- Critical startup crash fix: crash-proof Firebase Auth, App Check, and Firestore initialization with automatic local-mode fallback when FirebaseApp is unavailable.
+- Hardened Compose Canvas RadialGradient rendering against zero-size frames and guarded startup system-service reads (ConnectivityManager, TTS, DeviceSettings).
+- Simplified F-Droid repository display name to "A.O.Jarvis" (removed "Repo" suffix).

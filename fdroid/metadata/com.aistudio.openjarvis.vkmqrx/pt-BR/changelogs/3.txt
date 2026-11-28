@@ -1,0 +1,4 @@
+- v1.2.0 (build 3):
+- Verificação automática e solicitação de isenção da Otimização de Bateria (Doze) para manter o Foreground Service de voz do A.O.Jarvis estável em segundo plano.
+- Nova tela dedicada de Configurações de Voz (TTS) permitindo selecionar a voz preferida instalada no sistema, ajustar velocidade da fala (0.5x–2.0x), tom/pitch (0.5x–2.0x) e testar prévias em tempo real.
+- Novo modo local opcional ("Continuar sem conta (Pular)") na tela inicial.

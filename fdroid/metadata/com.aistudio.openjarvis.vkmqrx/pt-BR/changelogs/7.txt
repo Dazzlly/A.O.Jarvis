@@ -1,0 +1,4 @@
+• Correção do contraste dos títulos em todas as páginas nos temas escuros (Tron, Obsidian e Custom).
+• Correção completa da chamada "Hey Jarvis" e do Speech-to-Text para executar os comandos falados em vez de descartá-los, com bip de confirmação, recuperação de transcrição parcial e fallback automático de STT.
+• Melhoria na síntese de voz (TTS) com áudio em stream de mídia, foco de áudio e proteção contra travamento ao concluir a fala.
+• Suporte à importação direta do google-services.json dentro do app (e secret GOOGLE_SERVICES_JSON no GitHub Actions) para ativar Firebase Auth, Firestore e Gemini Cloud em qualquer compilação.

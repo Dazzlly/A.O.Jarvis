@@ -1,0 +1,9 @@
+A.O.Jarvis é um assistente pessoal Android com arquitetura local-first que une Gemini Cloud (via Firebase AI Logic), servidor Ollama rodando no seu computador na rede Wi-Fi local e comandos de voz offline.
+
+Principais recursos:
+- Reconhecimento de voz nativo do Android (SpeechRecognizer) com suporte offline e resposta falada (TTS).
+- Foreground Service contínuo para escuta por palavra de ativação e gatilhos autenticados na rede local (Wi-Fi LAN).
+- Alternância inteligente entre Gemini Cloud, Gemini Live e Ollama local via Wi-Fi.
+- Gerenciamento multi-sessão de conversas, memórias locais persistentes e comandos de voz personalizados.
+- Integrações com aplicativos do dispositivo e auto-navegação guiada pelo próprio assistente.
+- Verificação remota de atualizações via GitHub Releases e repositório F-Droid pessoal.
